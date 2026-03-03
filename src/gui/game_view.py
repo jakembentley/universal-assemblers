@@ -5,6 +5,8 @@ import pygame
 from .nav_panel      import NavPanel
 from .map_panel      import MapPanel
 from .entities_panel import EntitiesPanel
+from .widgets        import Button
+from .constants      import NAV_W
 
 
 class GameView:
@@ -15,9 +17,19 @@ class GameView:
         self.map_panel      = MapPanel(app)
         self.entities_panel = EntitiesPanel(app)
 
+        self._back_btn = Button(
+            rect=(NAV_W + 8, 6, 130, 24),
+            label="◀ GALAXY MAP",
+            callback=app.back_to_galaxy,
+            font_size=12,
+            bold=True,
+        )
+
     # ------------------------------------------------------------------
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
+        for event in events:
+            self._back_btn.handle_event(event)
         self.nav_panel.handle_events(events)
         self.map_panel.handle_events(events)
         self.entities_panel.handle_events(events)
@@ -28,6 +40,7 @@ class GameView:
         self.nav_panel.draw(surface)
         self.map_panel.draw(surface)
         self.entities_panel.draw(surface)
+        self._back_btn.draw(surface)
 
     # ------------------------------------------------------------------
     # Called by App when game state changes
