@@ -165,8 +165,6 @@ class GalaxyView:
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self._handle_click(event.pos)
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self.app.state = "menu"
 
     def _handle_click(self, pos: tuple[int, int]) -> None:
         # Enter-system button

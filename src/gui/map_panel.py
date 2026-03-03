@@ -86,6 +86,13 @@ class MapPanel:
                 if self.rect.collidepoint(event.pos):
                     self._handle_click(event.pos)
 
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                if self.rect.collidepoint(event.pos):
+                    if self._mode == "planet":
+                        self._go_back()          # planet view → system view
+                    else:
+                        self.app.back_to_galaxy()  # system view → galaxy map
+
     def _handle_click(self, pos: tuple[int, int]) -> None:
         hit_id = self._find_hit(pos)
         if hit_id is None:

@@ -13,6 +13,8 @@ from .constants import WINDOW_WIDTH, WINDOW_HEIGHT, FPS, TITLE
 from .main_menu import MainMenu
 from .game_view import GameView
 from .galaxy_view import GalaxyView
+from .game_clock import GameClock
+from .pause_menu import PauseMenu
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
@@ -36,6 +38,9 @@ class App:
         self.main_menu: MainMenu   = MainMenu(self)
         self.galaxy_view: GalaxyView | None = None
         self.game_view:   GameView  | None  = None
+
+        self.game_clock = GameClock()
+        self.pause_menu = PauseMenu(self)
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -82,6 +87,13 @@ class App:
         self.state = "galaxy"
 
     # ------------------------------------------------------------------
+    # Pause / resume
+
+    def resume_game(self) -> None:
+        self.pause_menu.is_active = False
+        self.game_clock.unpause()
+
+    # ------------------------------------------------------------------
     # Menu actions
 
     def start_new_game(self) -> None:
@@ -94,7 +106,13 @@ class App:
         self.game_state  = GameState.new_game(self.galaxy, home_idx=0)
         self.galaxy_view = GalaxyView(self)
         self.game_view   = None       # lazily created on first enter_system
+        self.game_clock  = GameClock()
         self.state       = "galaxy"
+
+    def save_game(self) -> None:
+        if self.galaxy:
+            MapGenerator.save(self.galaxy, "maps/quicksave.json")
+            print("[save_game] Saved to maps/quicksave.json")
 
     def load_game(self) -> None:
         path = self._open_file_dialog()
@@ -113,7 +131,16 @@ class App:
         self.game_state  = GameState.new_game(self.galaxy, home_idx=0)
         self.galaxy_view = GalaxyView(self)
         self.game_view   = None
+        self.game_clock  = GameClock()
+        self.pause_menu.is_active   = False
+        self.pause_menu._sub_active = False
         self.state       = "galaxy"
+
+    def exit_to_menu(self) -> None:
+        self.pause_menu.is_active   = False
+        self.pause_menu._sub_active = False
+        self.game_clock = GameClock()
+        self.state = "menu"
 
     @staticmethod
     def _open_file_dialog() -> str | None:
@@ -144,26 +171,47 @@ class App:
 
     def run(self) -> None:
         while True:
-            self.clock.tick(FPS)
+            dt = self.clock.tick(FPS)
             events = pygame.event.get()
 
+            # Global events (always processed)
             for event in events:
                 if event.type == pygame.QUIT:
                     self.quit()
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    if self.state == "system":
-                        self.back_to_galaxy()
-                    elif self.state == "galaxy":
-                        self.state = "menu"
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        if self.pause_menu.is_active:
+                            self.resume_game()
+                        elif self.state in ("galaxy", "system"):
+                            self.pause_menu.activate()
+                            self.game_clock.save_and_pause()
+                    if event.key == pygame.K_SPACE:
+                        if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
+                            self.game_clock.toggle_pause()
+                self.game_clock.handle_event(event)   # speed badge click
 
+            # Clock update
+            if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
+                self.game_clock.update(dt)
+
+            # View draw + events (gated behind pause menu)
             if self.state == "menu":
                 self.main_menu.handle_events(events)
                 self.main_menu.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
-                self.galaxy_view.handle_events(events)
+                if not self.pause_menu.is_active:
+                    self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
-                self.game_view.handle_events(events)
+                if not self.pause_menu.is_active:
+                    self.game_view.handle_events(events)
                 self.game_view.draw(self.screen)
+
+            # Overlay clock + pause menu
+            if self.state != "menu":
+                self.game_clock.draw(self.screen)
+            if self.pause_menu.is_active:
+                self.pause_menu.handle_events(events)
+                self.pause_menu.draw(self.screen)
 
             pygame.display.flip()
