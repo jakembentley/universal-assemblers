@@ -67,6 +67,15 @@ class Moon:
             "resources": self.resources.to_dict(),
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Moon":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            size=d["size"],
+            resources=Resource.from_dict(d["resources"]),
+        )
+
 
 @dataclass
 class CelestialBody:
@@ -103,6 +112,19 @@ class CelestialBody:
             d["subtype"] = self.subtype
         return d
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "CelestialBody":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            body_type=BodyType(d["body_type"]),
+            size=d["size"],
+            orbital_radius=d["orbital_radius"],
+            resources=Resource.from_dict(d["resources"]),
+            subtype=d.get("subtype"),
+            moons=[Moon.from_dict(m) for m in d.get("moons", [])],
+        )
+
 
 @dataclass
 class Star:
@@ -130,6 +152,16 @@ class Star:
             "mass": round(self.mass, 4),
             "resources": self.resources.to_dict(),
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Star":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            star_type=StarType(d["star_type"]),
+            mass=d["mass"],
+            resources=Resource.from_dict(d["resources"]),
+        )
 
 
 @dataclass
@@ -182,6 +214,16 @@ class SolarSystem:
             "orbital_bodies": [b.to_dict() for b in self.orbital_bodies],
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "SolarSystem":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            position=d["position"],
+            star=Star.from_dict(d["star"]),
+            orbital_bodies=[CelestialBody.from_dict(b) for b in d.get("orbital_bodies", [])],
+        )
+
 
 @dataclass
 class Galaxy:
@@ -219,3 +261,13 @@ class Galaxy:
             },
             "solar_systems": [s.to_dict() for s in self.solar_systems],
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Galaxy":
+        return cls(
+            seed=d["seed"],
+            name=d["name"],
+            generated_at=d["generated_at"],
+            parameters=d["parameters"],
+            solar_systems=[SolarSystem.from_dict(s) for s in d.get("solar_systems", [])],
+        )

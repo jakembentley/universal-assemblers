@@ -21,3 +21,13 @@ class Resource:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Resource":
+        return cls(
+            minerals=d.get("minerals", 0.0),
+            rare_minerals=d.get("rare_minerals", 0.0),
+            ice=d.get("ice", 0.0),
+            gas=d.get("gas", 0.0),
+            energy_output=d.get("energy_output", 0.0),
+        )
