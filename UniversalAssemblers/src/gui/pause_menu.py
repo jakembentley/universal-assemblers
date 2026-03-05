@@ -98,11 +98,11 @@ class PauseMenu:
     # Events
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
+        # ESC is handled by App.run() for both open and close; only route
+        # mouse/button events here so the menu doesn't close itself the same
+        # frame it was opened.
         buttons = self._sub_buttons if self._sub_active else self._main_buttons
         for event in events:
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self.app.resume_game()
-                return
             for btn in buttons:
                 btn.handle_event(event)
 

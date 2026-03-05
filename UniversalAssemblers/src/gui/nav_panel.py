@@ -236,6 +236,3 @@ class NavPanel:
 
         surface.set_clip(old_clip)
 
-
-def draw_separator(surface, x1, y, x2):
-    pygame.draw.line(surface, C_SEP, (x1, y), (x2, y))
