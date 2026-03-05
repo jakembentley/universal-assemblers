@@ -4,7 +4,9 @@
 # Called by the Claude Code Stop hook.
 # 1. Checks whether any changes exist under UniversalAssemblers/
 # 2. Runs a Python smoke test from the project directory
-# 3. If tests pass: stages UniversalAssemblers/ files, commits, and pushes
+# 3. If tests pass: stages only UniversalAssemblers/ source files, commits, and pushes
+#
+# Never stages build/, dist/, __pycache__, or binary files.
 
 REPO="/c/Users/Admin/CODE"
 PROJECT="UniversalAssemblers"
@@ -17,7 +19,11 @@ CHANGED=$(
   {
     git diff --name-only HEAD 2>/dev/null
     git ls-files --others --exclude-standard 2>/dev/null
-  } | grep "^${PROJECT}/" || true
+  } | grep "^${PROJECT}/" \
+    | grep -v "/__pycache__/" \
+    | grep -v "/build/"       \
+    | grep -v "/dist/"        \
+    || true
 )
 
 if [ -z "$CHANGED" ]; then
@@ -49,10 +55,18 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# ── 3. Stage, commit, push ────────────────────────────────────────────────────
+# ── 3. Stage source files only, commit, push ─────────────────────────────────
 cd "$REPO" || exit 1
 
-git add "${PROJECT}/"
+# Add only tracked source paths — never build artifacts or binaries
+git add "${PROJECT}/" \
+  ':!*/__pycache__' \
+  ':!*/build/'      \
+  ':!*/dist/'       \
+  ':!*.exe'         \
+  ':!*.pkg'         \
+  ':!*.pyz'         \
+  ':!*.pyc'
 
 # Nothing staged means changes were already committed
 if git diff --cached --quiet; then
