@@ -210,6 +210,8 @@ class NavPanel:
                 txt("Rare minerals", f"{res.rare_minerals:,.1f}", value_col=C_SELECTED)
                 txt("Ice",           f"{res.ice:,.1f}")
                 txt("Gas",           f"{res.gas:,.1f}")
+                if res.bios:
+                    txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
 
             elif body:
                 btype  = body.body_type.value
@@ -231,6 +233,8 @@ class NavPanel:
                 txt("Rare minerals", f"{res.rare_minerals:,.1f}", value_col=C_SELECTED)
                 txt("Ice",           f"{res.ice:,.1f}")
                 txt("Gas",           f"{res.gas:,.1f}")
+                if res.bios:
+                    txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
                 if res.energy_output:
                     txt("Energy",    f"{res.energy_output:.2e}", value_col=C_WARN)
 

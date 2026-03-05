@@ -17,6 +17,7 @@ class Resource:
     rare_minerals: float = 0.0
     ice: float = 0.0
     gas: float = 0.0
+    bios: float = 0.0        # biological feedstock; renewable on suitable bodies
     energy_output: float = 0.0
 
     def to_dict(self) -> dict:
@@ -29,5 +30,6 @@ class Resource:
             rare_minerals=d.get("rare_minerals", 0.0),
             ice=d.get("ice", 0.0),
             gas=d.get("gas", 0.0),
+            bios=d.get("bios", 0.0),
             energy_output=d.get("energy_output", 0.0),
         )
