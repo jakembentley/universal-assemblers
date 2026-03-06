@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pygame
 from .constants import (
-    NAV_W, TOP_H, HEADER_H, ROW_H, PADDING,
+    NAV_W, TOP_H, TASKBAR_H, HEADER_H, ROW_H, PADDING,
     C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SELECTED, C_HOVER, C_SEP, C_WARN, BODY_COLORS, STAR_COLORS,
     font,
@@ -32,9 +32,9 @@ class NavPanel:
     def __init__(self, app) -> None:
         self.app = app
 
-        sys_rect   = pygame.Rect(0, 0,      NAV_W, _SYS_H)
-        body_rect  = pygame.Rect(0, _SYS_H, NAV_W, _BODY_H)
-        self.stat_rect = pygame.Rect(0, _SYS_H + _BODY_H, NAV_W, _STAT_H)
+        sys_rect   = pygame.Rect(0, TASKBAR_H,                       NAV_W, _SYS_H)
+        body_rect  = pygame.Rect(0, TASKBAR_H + _SYS_H,             NAV_W, _BODY_H)
+        self.stat_rect = pygame.Rect(0, TASKBAR_H + _SYS_H + _BODY_H, NAV_W, _STAT_H)
 
         self._sys_list  = ScrollableList(sys_rect,  "Solar Systems", on_select=self._on_system_select)
         self._body_list = ScrollableList(body_rect, "Celestial Bodies", on_select=self._on_body_select)

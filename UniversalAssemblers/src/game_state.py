@@ -10,12 +10,83 @@ from __future__ import annotations
 
 import math
 import random
+import uuid as _uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .models.celestial import Galaxy
+
+
+# ---------------------------------------------------------------------------
+# Bot tasks
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BotTask:
+    """One assigned task for a bot type at a location."""
+    task_type:    str           # "mine" | "build"
+    resource:     str | None    # mine: "minerals"|"rare_minerals"|"ice"|"gas"|"bios"
+    entity_type:  str | None    # build: entity type_value (e.g. "factory", "miner")
+    target_amount: int          # units to mine OR entities to build
+    progress:     float = 0.0   # accumulated progress (units extracted / build fraction)
+    built_count:  int   = 0     # for build tasks: how many entities completed so far
+    allocation:   int   = 10    # 0–100 % of bot time devoted to this task
+    task_id:      str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+
+    @property
+    def complete(self) -> bool:
+        if self.task_type == "mine":
+            return self.progress >= self.target_amount
+        return self.built_count >= self.target_amount
+
+
+class BotTaskList:
+    """All bot tasks keyed by (location_id, bot_type)."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, list[BotTask]] = {}
+
+    @staticmethod
+    def _key(location_id: str, bot_type: str) -> str:
+        return f"{location_id}:{bot_type}"
+
+    def get(self, location_id: str, bot_type: str) -> list[BotTask]:
+        return self._tasks.get(self._key(location_id, bot_type), [])
+
+    def add(self, location_id: str, bot_type: str, task: BotTask) -> None:
+        k = self._key(location_id, bot_type)
+        if k not in self._tasks:
+            self._tasks[k] = []
+        self._tasks[k].append(task)
+
+    def remove(self, location_id: str, bot_type: str, task_id: str) -> None:
+        k = self._key(location_id, bot_type)
+        self._tasks[k] = [t for t in self._tasks.get(k, []) if t.task_id != task_id]
+
+    def adjust_allocation(
+        self, location_id: str, bot_type: str, task_id: str, delta: int
+    ) -> None:
+        """Change a task's allocation; does not exceed total of 100%."""
+        tasks = self.get(location_id, bot_type)
+        task  = next((t for t in tasks if t.task_id == task_id), None)
+        if not task:
+            return
+        used = sum(t.allocation for t in tasks if t.task_id != task_id)
+        max_alloc = max(0, 100 - used)
+        task.allocation = max(0, min(max_alloc, task.allocation + delta))
+
+    def total_allocation(self, location_id: str, bot_type: str) -> int:
+        return sum(t.allocation for t in self.get(location_id, bot_type))
+
+    def all_keys(self) -> list[tuple[str, str]]:
+        """Return all (location_id, bot_type) pairs that have tasks."""
+        result = []
+        for k in self._tasks:
+            loc, btype = k.rsplit(":", 1)
+            result.append((loc, btype))
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +236,7 @@ class GameState:
         self.entity_roster: EntityRoster = EntityRoster()
         self.tech: TechState = TechState()
         self.bio_state: BioState = BioState()
+        self.bot_tasks: BotTaskList = BotTaskList()
         self.order_queue: OrderQueue = OrderQueue()
         self.sim_engine: SimulationEngine = SimulationEngine(self)
         self._sim_events: list = []   # most-recent tick's events, for UI polling

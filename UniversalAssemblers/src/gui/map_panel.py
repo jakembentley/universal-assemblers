@@ -16,7 +16,7 @@ import random
 
 import pygame
 from .constants import (
-    NAV_W, MAP_W, TOP_H, HEADER_H, PADDING,
+    NAV_W, MAP_W, TOP_H, TASKBAR_H, HEADER_H, PADDING,
     C_BG, C_PANEL, C_BORDER, C_HEADER, C_ACCENT, C_TEXT, C_TEXT_DIM,
     C_SELECTED, C_HOVER, C_BTN, C_BTN_HOV, C_BTN_TXT,
     STAR_COLORS, BODY_COLORS, font,
@@ -33,7 +33,7 @@ class MapPanel:
 
     def __init__(self, app) -> None:
         self.app  = app
-        self.rect = pygame.Rect(NAV_W, 0, MAP_W, TOP_H)
+        self.rect = pygame.Rect(NAV_W, TASKBAR_H, MAP_W, TOP_H)
 
         self._mode = "system"    # "system" | "planet"
         self._zoom_body_id: str | None = None
@@ -61,7 +61,7 @@ class MapPanel:
         self._bg_stars = [
             (
                 rng.randint(NAV_W, NAV_W + MAP_W),
-                rng.randint(0, TOP_H),
+                rng.randint(TASKBAR_H, TASKBAR_H + TOP_H),
                 rng.randint(1, 2),
                 rng.uniform(0.3, 1.0),
             )

@@ -5,32 +5,24 @@ import pygame
 from .nav_panel      import NavPanel
 from .map_panel      import MapPanel
 from .entities_panel import EntitiesPanel
-from .widgets        import Button
-from .constants      import NAV_W
+from .taskbar        import TaskBar
+from .constants      import C_BG
 
 
 class GameView:
 
     def __init__(self, app) -> None:
         self.app            = app
+        self.taskbar        = TaskBar(app)
         self.nav_panel      = NavPanel(app)
         self.map_panel      = MapPanel(app)
         self.entities_panel = EntitiesPanel(app)
-
-        self._back_btn = Button(
-            rect=(NAV_W + 8, 6, 130, 24),
-            label="◀ GALAXY MAP",
-            callback=app.back_to_galaxy,
-            font_size=12,
-            bold=True,
-        )
 
     # ------------------------------------------------------------------
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         ev = self.app.entity_view
-        for event in events:
-            self._back_btn.handle_event(event)
+        self.taskbar.handle_events(events)
         self.nav_panel.handle_events(events)
         if ev.is_active:
             ev.handle_events(events)
@@ -39,15 +31,14 @@ class GameView:
         self.entities_panel.handle_events(events)
 
     def draw(self, surface: pygame.Surface) -> None:
-        from .constants import C_BG
         surface.fill(C_BG)
+        self.taskbar.draw(surface)
         self.nav_panel.draw(surface)
         if self.app.entity_view.is_active:
             self.app.entity_view.draw(surface)
         else:
             self.map_panel.draw(surface)
         self.entities_panel.draw(surface)
-        self._back_btn.draw(surface)
 
     # ------------------------------------------------------------------
     # Called by App when game state changes

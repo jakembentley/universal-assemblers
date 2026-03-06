@@ -15,8 +15,8 @@ class GameClock:
     SPEEDS: list[int] = [1, 5, 10]
     YEAR_PER_MS_AT_1X: float = 0.1 / 1000   # 0.1 yr / real-second at 1×
 
-    # HUD geometry
-    _RECT = pygame.Rect(WINDOW_WIDTH - 275, 8, 265, 34)
+    # HUD geometry — sits inside the taskbar (y=0, h=TASKBAR_H=36)
+    _RECT = pygame.Rect(WINDOW_WIDTH - 272, 2, 262, 32)
 
     def __init__(self) -> None:
         self.year: float = 0.0
