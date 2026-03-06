@@ -15,6 +15,7 @@ from .game_view import GameView
 from .galaxy_view import GalaxyView
 from .game_clock import GameClock
 from .pause_menu import PauseMenu
+from .entity_view import EntityView
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
@@ -39,8 +40,9 @@ class App:
         self.galaxy_view: GalaxyView | None = None
         self.game_view:   GameView  | None  = None
 
-        self.game_clock = GameClock()
-        self.pause_menu = PauseMenu(self)
+        self.game_clock  = GameClock()
+        self.pause_menu  = PauseMenu(self)
+        self.entity_view = EntityView(self)
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -84,6 +86,7 @@ class App:
         self.state = "system"
 
     def back_to_galaxy(self) -> None:
+        self.entity_view.deactivate()
         self.state = "galaxy"
 
     # ------------------------------------------------------------------
@@ -92,6 +95,12 @@ class App:
     def resume_game(self) -> None:
         self.pause_menu.is_active = False
         self.game_clock.unpause()
+
+    def open_entity_view(self, category: str, type_value: str) -> None:
+        self.entity_view.activate(category, type_value)
+
+    def close_entity_view(self) -> None:
+        self.entity_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -180,7 +189,9 @@ class App:
                     self.quit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.pause_menu.is_active:
+                        if self.entity_view.is_active:
+                            self.close_entity_view()
+                        elif self.pause_menu.is_active:
                             self.resume_game()
                         elif self.state in ("galaxy", "system"):
                             self.pause_menu.activate()

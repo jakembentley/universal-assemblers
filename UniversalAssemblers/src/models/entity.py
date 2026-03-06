@@ -47,6 +47,7 @@ class MegastructureType(str, Enum):
 class BotType(str, Enum):
     WORKER      = "worker"
     HARVESTER   = "harvester"
+    MINER       = "miner"
     CONSTRUCTOR = "constructor"
 
 
@@ -185,6 +186,10 @@ STARTING_ENTITIES: list[tuple[str, str, str, int]] = [
     ("structure", "factory",           "home_body",   1),
     ("structure", "power_plant_solar", "home_body",   1),
     ("structure", "research_array",    "home_body",   1),
+    ("structure", "power_plant_wind",  "home_body",   1),
+    # Bots on the starting planet
+    ("bot",       "miner",             "home_body",   1),
+    ("bot",       "constructor",       "home_body",   1),
     # Ships in the home system
     ("ship",      "probe",             "home_system", 1),
     ("ship",      "drop_ship",         "home_system", 1),

@@ -3,7 +3,8 @@ Bottom panel: player entities.
 
 Three columns — Structures | Bots | Ships — with counts read live from
 GameState.entity_roster.  Each column lists every known entity type; a
-count of 0 is shown dimly for types not yet built.
+count of 0 is shown dimly for types not yet built.  Clicking a row opens
+the entity detail view.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import pygame
 from .constants import (
     WINDOW_WIDTH, ENT_H, TOP_H, HEADER_H, PADDING, ROW_H,
     C_PANEL, C_BORDER, C_HEADER, C_ACCENT, C_TEXT, C_TEXT_DIM,
-    C_SEP, C_SELECTED, font,
+    C_SEP, C_SELECTED, C_HOVER, font,
 )
 from .widgets import draw_panel, draw_separator
 
@@ -38,6 +39,7 @@ _STRUCTURE_TYPES: list[tuple[str, str, str]] = [
 _BOT_TYPES: list[tuple[str, str, str]] = [
     ("worker",      "Worker Bot",  "◈"),
     ("harvester",   "Harvester",   "◈"),
+    ("miner",       "Miner Bot",   "◈"),
     ("constructor", "Constructor", "◈"),
 ]
 
@@ -62,9 +64,17 @@ class EntitiesPanel:
     def __init__(self, app) -> None:
         self.app  = app
         self.rect = pygame.Rect(0, TOP_H, WINDOW_WIDTH, ENT_H)
+        # Hit rects populated each draw(): (rect, category, type_val)
+        self._hit_rects: list[tuple[pygame.Rect, str, str]] = []
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
-        pass  # entity click → entity view (not yet implemented)
+        mouse_pos = pygame.mouse.get_pos()
+        for event in events:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for rect, category, type_val in self._hit_rects:
+                    if rect.collidepoint(event.pos):
+                        self.app.open_entity_view(category, type_val)
+                        return
 
     def draw(self, surface: pygame.Surface) -> None:
         content = draw_panel(surface, self.rect, "Player Entities")
@@ -73,6 +83,8 @@ class EntitiesPanel:
             if self.app.game_state else None
         )
 
+        self._hit_rects = []
+        mouse_pos = pygame.mouse.get_pos()
         col_w = content.width // len(_COLUMNS)
         row_h = ROW_H - 2
 
@@ -101,6 +113,13 @@ class EntitiesPanel:
                     break
 
                 count = roster.total(category, type_val) if roster else 0
+
+                row_rect = pygame.Rect(cx + 1, row_y, col_w - 2, row_h)
+                self._hit_rects.append((row_rect, category, type_val))
+
+                # Hover highlight
+                if row_rect.collidepoint(mouse_pos):
+                    pygame.draw.rect(surface, C_HOVER, row_rect, border_radius=2)
 
                 icon_surf  = font(12).render(icon, True, accent)
                 name_surf  = font(12).render(name, True, C_TEXT_DIM if count == 0 else C_TEXT)

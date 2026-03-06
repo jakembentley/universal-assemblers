@@ -28,17 +28,24 @@ class GameView:
     # ------------------------------------------------------------------
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
+        ev = self.app.entity_view
         for event in events:
             self._back_btn.handle_event(event)
         self.nav_panel.handle_events(events)
-        self.map_panel.handle_events(events)
+        if ev.is_active:
+            ev.handle_events(events)
+        else:
+            self.map_panel.handle_events(events)
         self.entities_panel.handle_events(events)
 
     def draw(self, surface: pygame.Surface) -> None:
         from .constants import C_BG
         surface.fill(C_BG)
         self.nav_panel.draw(surface)
-        self.map_panel.draw(surface)
+        if self.app.entity_view.is_active:
+            self.app.entity_view.draw(surface)
+        else:
+            self.map_panel.draw(surface)
         self.entities_panel.draw(surface)
         self._back_btn.draw(surface)
 

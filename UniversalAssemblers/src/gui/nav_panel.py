@@ -49,10 +49,12 @@ class NavPanel:
         galaxy = self.app.galaxy
         if not galaxy:
             return
+        self.app.close_entity_view()
         idx = next((i for i, s in enumerate(galaxy.solar_systems) if s.id == sys_id), 0)
         self.app.select_system(idx)
 
     def _on_body_select(self, body_id: str) -> None:
+        self.app.close_entity_view()
         self.app.select_body(body_id)
 
     # ------------------------------------------------------------------

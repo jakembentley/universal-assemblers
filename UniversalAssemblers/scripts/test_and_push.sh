@@ -44,9 +44,12 @@ from src.generator import MapGenerator
 
 gen = MapGenerator(seed=1, num_solar_systems=3)
 gs  = GameState.new_game(gen.generate())
-assert gs.entity_roster.total('structure', 'factory') == 1, 'factory missing'
-assert gs.entity_roster.total('ship', 'probe') == 1,       'probe missing'
-assert len(TECH_TREE) > 0,                                  'tech tree empty'
+assert gs.entity_roster.total('structure', 'factory') == 1,          'factory missing'
+assert gs.entity_roster.total('structure', 'power_plant_wind') == 1,  'wind plant missing'
+assert gs.entity_roster.total('ship', 'probe') == 1,                  'probe missing'
+assert gs.entity_roster.total('bot', 'miner') == 1,                   'miner bot missing'
+assert gs.entity_roster.total('bot', 'constructor') == 1,             'constructor bot missing'
+assert len(TECH_TREE) > 0,                                             'tech tree empty'
 print('Smoke test passed.')
 "
 
