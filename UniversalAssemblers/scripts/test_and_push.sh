@@ -4,7 +4,8 @@
 # Called by the Claude Code Stop hook.
 # 1. Checks whether any changes exist under UniversalAssemblers/
 # 2. Runs a Python smoke test from the project directory
-# 3. If tests pass: stages only UniversalAssemblers/ source files, commits, and pushes
+# 3. Runs build.bat (PyInstaller) to verify the exe builds cleanly
+# 4. If all pass: stages only UniversalAssemblers/ source files, commits, and pushes
 #
 # Never stages build/, dist/, __pycache__, or binary files.
 
@@ -58,7 +59,19 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# ── 3. Stage source files only, commit, push ─────────────────────────────────
+# ── 3. Build exe via build.bat ────────────────────────────────────────────────
+echo "[hook] Running build.bat..."
+
+"/c/Windows/System32/cmd.exe" /c build.bat
+
+if [ $? -ne 0 ]; then
+  echo "[hook] Build FAILED — aborting push."
+  exit 1
+fi
+
+echo "[hook] Build succeeded."
+
+# ── 4. Stage source files only, commit, push ─────────────────────────────────
 cd "$REPO" || exit 1
 
 # Add only tracked source paths — never build artifacts or binaries
