@@ -158,13 +158,14 @@ class GameState:
     """Tracks discovery, entity roster, tech state, and non-player simulation."""
 
     def __init__(self) -> None:
-        from .simulation import BioState, SimulationEngine
+        from .simulation import BioState, SimulationEngine, OrderQueue
         self.galaxy = None
         self._states: dict[str, DiscoveryState] = {}
         self.adjacency: dict[str, list[str]] = {}
         self.entity_roster: EntityRoster = EntityRoster()
         self.tech: TechState = TechState()
         self.bio_state: BioState = BioState()
+        self.order_queue: OrderQueue = OrderQueue()
         self.sim_engine: SimulationEngine = SimulationEngine(self)
         self._sim_events: list = []   # most-recent tick's events, for UI polling
 

@@ -96,8 +96,14 @@ class App:
         self.pause_menu.is_active = False
         self.game_clock.unpause()
 
-    def open_entity_view(self, category: str, type_value: str) -> None:
-        self.entity_view.activate(category, type_value)
+    def open_entity_view(
+        self,
+        category: str,
+        type_value: str,
+        system_id: str | None = None,
+        body_id: str | None = None,
+    ) -> None:
+        self.entity_view.activate(category, type_value, system_id, body_id)
 
     def close_entity_view(self) -> None:
         self.entity_view.deactivate()

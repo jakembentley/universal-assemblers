@@ -68,12 +68,17 @@ class EntitiesPanel:
         self._hit_rects: list[tuple[pygame.Rect, str, str]] = []
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
-        mouse_pos = pygame.mouse.get_pos()
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for rect, category, type_val in self._hit_rects:
                     if rect.collidepoint(event.pos):
-                        self.app.open_entity_view(category, type_val)
+                        sys   = self.app.selected_system
+                        sys_id  = sys.id if sys else None
+                        body_id = self.app.selected_body_id
+                        # Ships live at system level; structures/bots at body level
+                        if category == "ship":
+                            body_id = None
+                        self.app.open_entity_view(category, type_val, sys_id, body_id)
                         return
 
     def draw(self, surface: pygame.Surface) -> None:

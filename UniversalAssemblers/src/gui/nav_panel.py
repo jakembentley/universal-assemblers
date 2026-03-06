@@ -80,17 +80,32 @@ class NavPanel:
             self._body_list.set_items([])
             return
 
+        gs         = self.app.game_state
+        bio_state  = gs.bio_state  if gs else None
+        roster     = gs.entity_roster if gs else None
+
+        def _indicators(body_id: str) -> str:
+            parts = []
+            if bio_state and bio_state.get(body_id):
+                pop = bio_state.get(body_id)
+                from ..simulation import BioType
+                parts.append("U" if pop.bio_type == BioType.UPLIFTED else "b")
+            if roster:
+                n = sum(i.count for i in roster.at(body_id))
+                if n:
+                    parts.append(f"[{n}]")
+            return (" " + " ".join(parts)) if parts else ""
+
         items: list[tuple[str, str, tuple | None]] = []
 
-        # Star
         star_col = STAR_COLORS.get(system.star.star_type.value, (255, 220, 80))
         items.append((f"★ {system.star.name}", system.star.id, star_col))
 
         for body in system.orbital_bodies:
-            btype  = body.body_type.value
+            btype   = body.body_type.value
             subtype = body.subtype or btype
-            color  = BODY_COLORS.get(subtype, BODY_COLORS.get(btype))
-            short  = body.name.replace(system.name + " ", "")
+            color   = BODY_COLORS.get(subtype, BODY_COLORS.get(btype))
+            short   = body.name.replace(system.name + " ", "")
 
             if btype == "planet":
                 prefix = "◉"
@@ -103,11 +118,13 @@ class NavPanel:
             else:
                 prefix = "○"
 
-            items.append((f"{prefix} {short}", body.id, color))
+            ind = _indicators(body.id)
+            items.append((f"{prefix} {short}{ind}", body.id, color))
 
             for moon in body.moons:
                 moon_short = moon.name.replace(body.name + "-", "")
-                items.append((f"  ◦ {moon_short}", moon.id, BODY_COLORS["moon"]))
+                mind = _indicators(moon.id)
+                items.append((f"  ◦ {moon_short}{mind}", moon.id, BODY_COLORS["moon"]))
 
         self._body_list.set_items(items)
         self._body_list.set_selected(self.app.selected_body_id)
@@ -134,6 +151,8 @@ class NavPanel:
     # Draw
 
     def draw(self, surface: pygame.Surface) -> None:
+        # Rebuild body list each frame so entity/bio indicators stay current
+        self._rebuild_bodies()
         self._sys_list.draw(surface)
         self._body_list.draw(surface)
         self._draw_stats(surface)
@@ -214,6 +233,18 @@ class NavPanel:
                 txt("Gas",           f"{res.gas:,.1f}")
                 if res.bios:
                     txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
+                # Bio population
+                gs = self.app.game_state
+                if gs:
+                    pop = gs.bio_state.get(moon.id)
+                    if pop:
+                        section("Bio Population")
+                        from ..simulation import BioType as _BT
+                        txt("Type",       pop.bio_type.value.capitalize())
+                        txt("Population", f"{pop.population:,.0f}",
+                            value_col=(255, 80, 80) if pop.bio_type == _BT.UPLIFTED else (80, 200, 100))
+                        txt("Aggression", f"{pop.aggression:.0%}",
+                            value_col=C_WARN if pop.aggression > 0.65 else C_TEXT)
 
             elif body:
                 btype  = body.body_type.value
@@ -239,6 +270,19 @@ class NavPanel:
                     txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
                 if res.energy_output:
                     txt("Energy",    f"{res.energy_output:.2e}", value_col=C_WARN)
+                # Bio population
+                gs = self.app.game_state
+                if gs:
+                    pop = gs.bio_state.get(body.id)
+                    if pop:
+                        section("Bio Population")
+                        from ..simulation import BioType as _BT
+                        txt("Type",       pop.bio_type.value.capitalize())
+                        txt("Population", f"{pop.population:,.0f}",
+                            value_col=(255, 80, 80) if pop.bio_type == _BT.UPLIFTED else (80, 200, 100))
+                        txt("Aggression", f"{pop.aggression:.0%}",
+                            value_col=C_WARN if pop.aggression > 0.65 else C_TEXT)
+                        txt("Growth",     f"{pop.growth_rate:.1%}/yr")
 
         surface.set_clip(old_clip)
 
