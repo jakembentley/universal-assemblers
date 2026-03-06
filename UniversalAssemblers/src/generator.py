@@ -400,7 +400,8 @@ class MapGenerator:
         return [self._generate_moon(parent_id, parent_name, i) for i in range(num)]
 
     def _generate_moon(self, parent_id: str, parent_name: str, index: int) -> Moon:
-        label = _MOON_LABELS[index] if index < len(_MOON_LABELS) else str(index)
+        label    = _MOON_LABELS[index] if index < len(_MOON_LABELS) else str(index)
+        bios_val = round(self.rng.uniform(2, 30), 2) if self.rng.random() < 0.05 else 0.0
         return Moon(
             id=f"{parent_id}_moon_{index}",
             name=f"{parent_name}-{label}",
@@ -410,6 +411,7 @@ class MapGenerator:
                 rare_minerals=round(self.rng.uniform(0, 200), 2),
                 ice=round(self.rng.uniform(0, 800), 2),
                 gas=round(self.rng.uniform(0, 60), 2),
+                bios=bios_val,
             ),
         )
 
@@ -482,18 +484,24 @@ class MapGenerator:
                 gas=round(self.rng.uniform(2000, 80000), 2),
             )
         if subtype == PlanetSubtype.SUPER_EARTH:
+            bios_val = round(self.rng.uniform(5, 80), 2) if self.rng.random() < 0.15 else 0.0
             return Resource(
                 minerals=round(self.rng.uniform(3000, 20000), 2),
                 rare_minerals=round(self.rng.uniform(50, 800), 2),
                 ice=round(self.rng.uniform(0, 2000) if cold else 0, 2),
                 gas=round(self.rng.uniform(0, 500), 2),
+                bios=bios_val,
             )
-        # TERRESTRIAL
+        # TERRESTRIAL — higher bios chance in the habitable zone (0.5–2.5 AU)
+        in_hab_zone = 0.5 <= orbital_radius <= 2.5
+        bios_chance = 0.40 if in_hab_zone else 0.10
+        bios_val    = round(self.rng.uniform(20, 200), 2) if self.rng.random() < bios_chance else 0.0
         return Resource(
             minerals=round(self.rng.uniform(500, 8000), 2),
             rare_minerals=round(self.rng.uniform(5, 300), 2),
             ice=round(self.rng.uniform(0, 800) if cold else 0, 2),
             gas=round(self.rng.uniform(0, 150), 2),
+            bios=bios_val,
         )
 
     # ------------------------------------------------------------------

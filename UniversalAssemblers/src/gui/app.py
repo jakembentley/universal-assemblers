@@ -201,9 +201,13 @@ class App:
                             self.game_clock.toggle_pause()
                 self.game_clock.handle_event(event)   # speed badge click
 
-            # Clock update
+            # Clock + simulation update
             if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
                 self.game_clock.update(dt)
+                if self.game_state and self.game_clock.current_speed > 0:
+                    from .game_clock import GameClock
+                    dt_years = dt * GameClock.YEAR_PER_MS_AT_1X * self.game_clock.current_speed
+                    self.game_state.tick(dt_years)
 
             # View draw + events (gated behind pause menu)
             if self.state == "menu":

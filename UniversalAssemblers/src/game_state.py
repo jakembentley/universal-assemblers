@@ -1,13 +1,15 @@
 """
-GameState — discovery tracking, entity roster, and tech state.
+GameState — discovery tracking, entity roster, tech state, and simulation.
 
 DiscoveryState controls what the player can see and interact with.
 EntityRoster tracks every entity instance and its location.
 TechState tracks which technologies have been researched.
+BioState + SimulationEngine handle non-player bio populations.
 """
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -153,14 +155,18 @@ class TechState:
 # ---------------------------------------------------------------------------
 
 class GameState:
-    """Tracks discovery, entity roster, and tech state."""
+    """Tracks discovery, entity roster, tech state, and non-player simulation."""
 
     def __init__(self) -> None:
+        from .simulation import BioState, SimulationEngine
         self.galaxy = None
         self._states: dict[str, DiscoveryState] = {}
         self.adjacency: dict[str, list[str]] = {}
         self.entity_roster: EntityRoster = EntityRoster()
         self.tech: TechState = TechState()
+        self.bio_state: BioState = BioState()
+        self.sim_engine: SimulationEngine = SimulationEngine(self)
+        self._sim_events: list = []   # most-recent tick's events, for UI polling
 
     # ------------------------------------------------------------------
     # Factory
@@ -191,7 +197,45 @@ class GameState:
             loc_id = home_system_id if loc_token == "home_system" else home_body_id
             gs.entity_roster.add(cat, type_val, loc_id, count)
 
+        # Bio populations — seed from bios resource values on all bodies
+        gs._init_bio_state()
+
+        # Build sim engine now that galaxy and bio_state are populated
+        from .simulation import SimulationEngine
+        gs.sim_engine = SimulationEngine(gs)
+
         return gs
+
+    def _init_bio_state(self) -> None:
+        """Scan every body in the galaxy and spawn BioPopulations where bios > 0."""
+        from .simulation import make_bio_population
+        if not self.galaxy:
+            return
+        rng = random.Random(self.galaxy.seed ^ 0xB10B1AB)
+        for sys in self.galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                if body.resources.bios > 0:
+                    self.bio_state.add(
+                        make_bio_population(body.id, sys.id, body.resources.bios, rng)
+                    )
+                for moon in body.moons:
+                    if moon.resources.bios > 0:
+                        self.bio_state.add(
+                            make_bio_population(moon.id, sys.id, moon.resources.bios, rng)
+                        )
+
+    # ------------------------------------------------------------------
+    # Simulation tick
+
+    def tick(self, dt_years: float) -> None:
+        """Advance the non-player simulation. Called every game frame when unpaused."""
+        self._sim_events = self.sim_engine.tick(dt_years)
+
+    def pop_sim_events(self) -> list:
+        """Return and clear the most-recent sim events (for UI notification)."""
+        events = list(self._sim_events)
+        self._sim_events = []
+        return events
 
     # ------------------------------------------------------------------
     # Adjacency
