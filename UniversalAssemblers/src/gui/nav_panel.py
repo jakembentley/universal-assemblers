@@ -80,7 +80,15 @@ class NavPanel:
             self._body_list.set_items([])
             return
 
-        gs         = self.app.game_state
+        gs = self.app.game_state
+
+        # Gate body list on probe status
+        if gs and not gs.is_probed(system.id):
+            self._body_list.set_items([
+                ("  ⚠  Send a Probe to reveal", "_probe_hint", C_WARN),
+            ])
+            return
+
         bio_state  = gs.bio_state  if gs else None
         roster     = gs.entity_roster if gs else None
 

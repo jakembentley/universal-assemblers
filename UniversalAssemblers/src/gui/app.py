@@ -5,6 +5,7 @@ machine (main_menu → galaxy → system).
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import pygame
@@ -16,6 +17,7 @@ from .galaxy_view import GalaxyView
 from .game_clock import GameClock
 from .pause_menu import PauseMenu
 from .entity_view import EntityView
+from .tech_view import TechView
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
@@ -43,6 +45,7 @@ class App:
         self.game_clock  = GameClock()
         self.pause_menu  = PauseMenu(self)
         self.entity_view = EntityView(self)
+        self.tech_view   = TechView(self)
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -103,10 +106,18 @@ class App:
         system_id: str | None = None,
         body_id: str | None = None,
     ) -> None:
+        self.tech_view.deactivate()
         self.entity_view.activate(category, type_value, system_id, body_id)
 
     def close_entity_view(self) -> None:
         self.entity_view.deactivate()
+
+    def open_tech_view(self) -> None:
+        self.entity_view.deactivate()
+        self.tech_view.activate()
+
+    def close_tech_view(self) -> None:
+        self.tech_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -125,9 +136,15 @@ class App:
         self.state       = "galaxy"
 
     def save_game(self) -> None:
-        if self.galaxy:
-            MapGenerator.save(self.galaxy, "maps/quicksave.json")
-            print("[save_game] Saved to maps/quicksave.json")
+        if not self.galaxy or not self.game_state:
+            return
+        os.makedirs("maps", exist_ok=True)
+        MapGenerator.save(self.galaxy, "maps/quicksave_galaxy.json")
+        gs_data = self.game_state.to_dict()
+        gs_data["galaxy_file"] = "maps/quicksave_galaxy.json"
+        with open("maps/quicksave.json", "w", encoding="utf-8") as fh:
+            json.dump(gs_data, fh, indent=2)
+        print("[save_game] Saved to maps/quicksave.json + quicksave_galaxy.json")
 
     def load_game(self) -> None:
         path = self._open_file_dialog()
@@ -136,20 +153,36 @@ class App:
         try:
             with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
-            self.galaxy = Galaxy.from_dict(data)
+
+            if data.get("version") == 1:
+                # Full save: load galaxy from companion file
+                galaxy_file = data.get("galaxy_file", "")
+                if not os.path.isabs(galaxy_file):
+                    # Resolve relative to the save file's directory
+                    galaxy_file = os.path.join(os.path.dirname(path), galaxy_file)
+                if not os.path.exists(galaxy_file):
+                    raise FileNotFoundError(f"Galaxy file not found: {galaxy_file}")
+                with open(galaxy_file, encoding="utf-8") as fh:
+                    galaxy_data = json.load(fh)
+                self.galaxy     = Galaxy.from_dict(galaxy_data)
+                self.game_state = GameState.from_dict(data, self.galaxy)
+            else:
+                # Legacy: galaxy-only JSON
+                self.galaxy     = Galaxy.from_dict(data)
+                self.game_state = GameState.new_game(self.galaxy, home_idx=0)
+
         except Exception as exc:
             print(f"[load_game] Failed to load '{path}': {exc}")
             return
-        self._selected_system_idx = 0
-        self.selected_body_id     = None
 
-        self.game_state  = GameState.new_game(self.galaxy, home_idx=0)
-        self.galaxy_view = GalaxyView(self)
-        self.game_view   = None
-        self.game_clock  = GameClock()
+        self._selected_system_idx   = 0
+        self.selected_body_id       = None
+        self.galaxy_view            = GalaxyView(self)
+        self.game_view              = None
+        self.game_clock             = GameClock()
         self.pause_menu.is_active   = False
         self.pause_menu._sub_active = False
-        self.state       = "galaxy"
+        self.state                  = "galaxy"
 
     def exit_to_menu(self) -> None:
         self.pause_menu.is_active   = False
@@ -195,7 +228,9 @@ class App:
                     self.quit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.entity_view.is_active:
+                        if self.tech_view.is_active:
+                            self.close_tech_view()
+                        elif self.entity_view.is_active:
                             self.close_entity_view()
                         elif self.pause_menu.is_active:
                             self.resume_game()
@@ -205,6 +240,12 @@ class App:
                     if event.key == pygame.K_SPACE:
                         if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
                             self.game_clock.toggle_pause()
+                    if event.key == pygame.K_t:
+                        if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
+                            if self.tech_view.is_active:
+                                self.close_tech_view()
+                            else:
+                                self.open_tech_view()
                 self.game_clock.handle_event(event)   # speed badge click
 
             # Clock + simulation update
@@ -220,11 +261,11 @@ class App:
                 self.main_menu.handle_events(events)
                 self.main_menu.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
-                if not self.pause_menu.is_active:
+                if not self.pause_menu.is_active and not self.tech_view.is_active:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
-                if not self.pause_menu.is_active:
+                if not self.pause_menu.is_active and not self.tech_view.is_active:
                     self.game_view.handle_events(events)
                 self.game_view.draw(self.screen)
 
@@ -234,5 +275,10 @@ class App:
             if self.pause_menu.is_active:
                 self.pause_menu.handle_events(events)
                 self.pause_menu.draw(self.screen)
+
+            # Tech tree overlay (above pause menu so it can be opened anytime)
+            if self.tech_view.is_active:
+                self.tech_view.handle_events(events)
+                self.tech_view.draw(self.screen)
 
             pygame.display.flip()
