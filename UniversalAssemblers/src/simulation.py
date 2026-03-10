@@ -144,8 +144,28 @@ class OrderQueue:
 # Simulation engine
 # ---------------------------------------------------------------------------
 
+_MINE_RATES: dict[str, float] = {
+    "miner":     10.0,   # resource-units / yr / bot at 100% allocation
+    "harvester": 15.0,
+    "worker":     5.0,
+}
+
+_BUILD_RATES: dict[str, float] = {
+    "constructor": 1.0,  # entities / yr / bot at 100% allocation
+    "worker":      0.5,
+}
+
+# All structure type_values that constructors can place
+_STRUCTURE_TYPES: frozenset[str] = frozenset({
+    "extractor", "factory", "research_array", "shipyard", "storage_hub",
+    "replicator", "power_plant_solar", "power_plant_wind", "power_plant_bios",
+    "power_plant_fossil", "power_plant_nuclear", "power_plant_cold_fusion",
+    "power_plant_dark_matter",
+})
+
+
 class SimulationEngine:
-    """Per-tick game simulation: bios growth, resource consumption, ships."""
+    """Per-tick game simulation: bios growth, resource consumption, ships, bots."""
 
     def __init__(self, gs: "GameState") -> None:
         self.gs = gs
@@ -157,6 +177,7 @@ class SimulationEngine:
         events.extend(self._tick_power_plants(dt_years))
         self._tick_research(dt_years)
         events.extend(self._tick_ships(dt_years))
+        events.extend(self._tick_bot_tasks(dt_years))
         return events
 
     # ------------------------------------------------------------------
@@ -258,5 +279,88 @@ class SimulationEngine:
                         "type": "probe_arrived",
                         "system_id": order.target_system_id,
                     })
+
+        return events
+
+    def _tick_bot_tasks(self, dt_years: float) -> list:
+        """Advance bot task progress; deduct build costs from body resources."""
+        from .models.entity import BUILD_COSTS
+        events: list = []
+        gs     = self.gs
+        galaxy = gs.galaxy
+        if not galaxy:
+            return events
+
+        # Build body_id → body lookup
+        body_map: dict[str, object] = {}
+        for sys in galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                body_map[body.id] = body
+                for moon in body.moons:
+                    body_map[moon.id] = moon
+
+        for loc_id, bot_type in list(gs.bot_tasks.all_keys()):
+            tasks     = gs.bot_tasks.get(loc_id, bot_type)
+            bot_count = gs.entity_roster.total("bot", bot_type)
+            if bot_count == 0:
+                continue
+            body = body_map.get(loc_id)
+
+            completed_ids: list[str] = []
+            for task in tasks:
+                if task.complete:
+                    completed_ids.append(task.task_id)
+                    continue
+
+                alloc_frac     = task.allocation / 100.0
+                effective_bots = bot_count * alloc_frac
+
+                if task.task_type == "mine":
+                    rate  = _MINE_RATES.get(bot_type, 5.0)
+                    mined = rate * effective_bots * dt_years
+                    if body:
+                        res       = body.resources  # type: ignore[attr-defined]
+                        available = getattr(res, task.resource or "", 0.0)
+                        actual    = min(mined, available)
+                        if actual > 0:
+                            setattr(res, task.resource, available - actual)
+                            task.progress += actual
+                    else:
+                        task.progress += mined
+
+                elif task.task_type == "build":
+                    rate           = _BUILD_RATES.get(bot_type, 0.25)
+                    task.progress += rate * effective_bots * dt_years
+
+                    # Complete whole units while progress >= 1.0
+                    cost = BUILD_COSTS.get(task.entity_type or "", {})
+                    while task.progress >= 1.0 and task.built_count < task.target_amount:
+                        # Check and deduct resource cost
+                        if cost and body:
+                            res = body.resources  # type: ignore[attr-defined]
+                            if not all(
+                                getattr(res, r, 0.0) >= amt for r, amt in cost.items()
+                            ):
+                                # Stall — not enough resources
+                                task.progress = min(task.progress, 0.9999)
+                                break
+                            for r, amt in cost.items():
+                                setattr(res, r, max(0.0, getattr(res, r, 0.0) - amt))
+
+                        task.progress    -= 1.0
+                        task.built_count += 1
+                        cat = "structure" if task.entity_type in _STRUCTURE_TYPES else "bot"
+                        gs.entity_roster.add(cat, task.entity_type or "", loc_id, 1)
+                        events.append({
+                            "type":        "entity_built",
+                            "entity_type": task.entity_type,
+                            "location":    loc_id,
+                        })
+
+                if task.complete:
+                    completed_ids.append(task.task_id)
+
+            for tid in completed_ids:
+                gs.bot_tasks.remove(loc_id, bot_type, tid)
 
         return events

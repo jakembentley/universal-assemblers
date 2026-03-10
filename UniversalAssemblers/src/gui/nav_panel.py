@@ -198,11 +198,12 @@ class NavPanel:
                             if edit_obj:
                                 break
                     if edit_obj is not None:
+                        # Full-width input that sits at the top of the stat panel
                         input_rect = pygame.Rect(
-                            self._edit_icon_rect.x - 160,
-                            self._edit_icon_rect.y - 2,
-                            160,
-                            22,
+                            self.stat_rect.x + PADDING,
+                            self.stat_rect.y + PADDING,
+                            self.stat_rect.width - PADDING * 2,
+                            26,
                         )
                         self._name_input = TextInput(input_rect, edit_obj.name, font_size=12)
                         self._name_input.active = True

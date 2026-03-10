@@ -81,6 +81,22 @@ _MINE_RES_LABELS = {
     "bios":          "Bios",
 }
 
+# Which task types each bot type is allowed to add
+_BOT_ALLOWED_TASKS: dict[str, list[str]] = {
+    "miner":       ["mine"],
+    "harvester":   ["mine"],
+    "constructor": ["build"],
+    "worker":      ["mine", "build"],
+}
+
+# Buildable entity types for constructor tasks
+_BUILD_STRUCTURES = [
+    "extractor", "factory", "research_array",
+    "power_plant_solar", "power_plant_wind", "power_plant_fossil",
+    "power_plant_nuclear", "shipyard", "storage_hub",
+]
+_BUILD_BOTS = ["miner", "constructor", "worker", "harvester"]
+
 
 class EntityView:
     """Overlay that replaces the map panel to show entity details."""
@@ -141,6 +157,9 @@ class EntityView:
         self._system_id   = system_id
         self._body_id     = body_id
         self._add_task_mode = False
+        # Default task type based on bot capabilities
+        allowed = _BOT_ALLOWED_TASKS.get(type_value, ["mine"])
+        self._add_task_type = allowed[0]
         self._send_mode     = False
         self._send_system_id = None
         self._hit_rects      = []
@@ -267,7 +286,9 @@ class EntityView:
             self._add_task_mode = not self._add_task_mode
 
         elif action == "set_task_type":
-            self._add_task_type = str(data)
+            allowed = _BOT_ALLOWED_TASKS.get(self._type_value, ["mine"])
+            if str(data) in allowed:
+                self._add_task_type = str(data)
 
         elif action == "set_res":
             self._add_task_res = str(data)
@@ -280,6 +301,10 @@ class EntityView:
 
         elif action == "confirm_add_task":
             from ..game_state import BotTask
+            # Validate: only allow task types this bot can perform
+            allowed = _BOT_ALLOWED_TASKS.get(self._type_value, ["mine"])
+            if self._add_task_type not in allowed:
+                return
             if self._add_task_type == "mine":
                 task = BotTask(
                     task_type="mine",
@@ -291,7 +316,7 @@ class EntityView:
                 task = BotTask(
                     task_type="build",
                     resource=None,
-                    entity_type=self._add_task_res,   # reusing field for entity type
+                    entity_type=self._add_task_res,
                     target_amount=max(1, self._add_task_amount // 100),
                 )
             gs.bot_tasks.add(loc, self._type_value, task)
@@ -442,7 +467,7 @@ class EntityView:
             note = font(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
             surface.blit(note, (cx, cy))
             cy += ROW_H
-            note2 = font(12).render("Open the Tech Tree (T) to assign research.", True, C_TEXT_DIM)
+            note2 = font(12).render("Use the TECH TREE button above to assign research.", True, C_TEXT_DIM)
             surface.blit(note2, (cx, cy))
             cy += ROW_H
 
@@ -460,17 +485,18 @@ class EntityView:
         tasks = gs.bot_tasks.get(loc, self._type_value)
         total_alloc = gs.bot_tasks.total_allocation(loc, self._type_value)
 
-        # Total allocation bar
+        # Total allocation label + bar (drawn within the visible clip area)
+        alloc_lbl = font(11).render(f"Total allocation: {total_alloc}%", True, C_TEXT_DIM)
+        surface.blit(alloc_lbl, (cx, cy))
+        cy += 14
         bar_w = self._rect.width - PADDING * 4
-        bar_r = pygame.Rect(cx, cy, bar_w, 12)
+        bar_r = pygame.Rect(cx, cy, bar_w, 10)
         pygame.draw.rect(surface, (30, 50, 80), bar_r, border_radius=3)
         fill_w = int(bar_w * total_alloc / 100)
         col = (80, 200, 100) if total_alloc <= 100 else (255, 80, 80)
         if fill_w > 0:
-            pygame.draw.rect(surface, col, pygame.Rect(cx, cy, fill_w, 12), border_radius=3)
-        alloc_lbl = font(11).render(f"Allocation: {total_alloc}%", True, C_TEXT_DIM)
-        surface.blit(alloc_lbl, (cx, cy - 14))
-        cy += 20
+            pygame.draw.rect(surface, col, pygame.Rect(cx, cy, fill_w, 10), border_radius=3)
+        cy += 18
 
         # Task rows
         if tasks:
@@ -558,22 +584,40 @@ class EntityView:
         return cy
 
     def _draw_add_task_form(self, surface: pygame.Surface, cx: int, cy: int) -> int:
-        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 165)
+        from ..models.entity import BUILD_COSTS
+
+        allowed_types = _BOT_ALLOWED_TASKS.get(self._type_value, ["mine"])
+
+        # Estimate form height
+        form_h = 8
+        if len(allowed_types) > 1:
+            form_h += 30   # task type toggle row
+        form_h += 60       # resource / entity grid (2 rows max)
+        form_h += 30       # amount row
+        if self._add_task_type == "build":
+            form_h += 20   # cost line
+        form_h += 34       # confirm button + padding
+
+        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, form_h)
         pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
         pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
 
         fx = cx + 8
         fy = cy + 8
 
-        # Task type toggle
-        for i, (ttype, tlabel) in enumerate([("mine", "Mine"), ("build", "Build")]):
-            tr = pygame.Rect(fx + i * 80, fy, 72, 22)
-            sel = self._add_task_type == ttype
-            pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tr, border_radius=3)
-            surface.blit(font(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT),
-                         font(11, bold=True).render(tlabel, True, C_BTN_TXT).get_rect(center=tr.center))
-            self._hit_rects.append((tr, "set_task_type", ttype))
-        fy += 30
+        # Task type toggle — only shown if the bot can do more than one type
+        if len(allowed_types) > 1:
+            all_types = [("mine", "Mine"), ("build", "Build")]
+            for i, (ttype, tlabel) in enumerate(
+                (t for t in all_types if t[0] in allowed_types)
+            ):
+                tr = pygame.Rect(fx + i * 80, fy, 72, 22)
+                sel = self._add_task_type == ttype
+                pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tr, border_radius=3)
+                lbl = font(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT)
+                surface.blit(lbl, lbl.get_rect(center=tr.center))
+                self._hit_rects.append((tr, "set_task_type", ttype))
+            fy += 30
 
         # Resource / entity type selector
         if self._add_task_type == "mine":
@@ -581,23 +625,25 @@ class EntityView:
                 rr = pygame.Rect(fx + (i % 3) * 90, fy + (i // 3) * 26, 82, 22)
                 sel = self._add_task_res == res
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, rr, border_radius=3)
-                rlbl = font(10, bold=True).render(_MINE_RES_LABELS[res], True,
-                                                  (0, 0, 0) if sel else C_BTN_TXT)
+                rlbl = font(10, bold=True).render(
+                    _MINE_RES_LABELS[res], True, (0, 0, 0) if sel else C_BTN_TXT
+                )
                 surface.blit(rlbl, rlbl.get_rect(center=rr.center))
                 self._hit_rects.append((rr, "set_res", res))
-            fy += 60
+            fy += ((len(_MINE_RESOURCES) - 1) // 3 + 1) * 26 + 4
         else:
-            # Simple entity types to build
-            buildables = ["extractor", "factory", "research_array", "miner", "constructor"]
+            # Show structures then bots in a grid
+            buildables = _BUILD_STRUCTURES + _BUILD_BOTS
             for i, etype in enumerate(buildables):
                 er = pygame.Rect(fx + (i % 3) * 95, fy + (i // 3) * 26, 88, 22)
                 sel = self._add_task_res == etype
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, er, border_radius=3)
-                elbl = font(10, bold=True).render(etype.replace("_", " ").title(), True,
-                                                  (0, 0, 0) if sel else C_BTN_TXT)
+                elbl = font(9, bold=True).render(
+                    etype.replace("_", " ").title(), True, (0, 0, 0) if sel else C_BTN_TXT
+                )
                 surface.blit(elbl, elbl.get_rect(center=er.center))
                 self._hit_rects.append((er, "set_res", etype))
-            fy += 60
+            fy += ((len(buildables) - 1) // 3 + 1) * 26 + 4
 
         # Amount row
         dec_r = pygame.Rect(fx, fy, 26, 22)
@@ -606,22 +652,36 @@ class EntityView:
         pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
         surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
         surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
-        amt_s = font(12, bold=True).render(str(self._add_task_amount), True, C_SELECTED)
+        target = self._add_task_amount if self._add_task_type == "mine" else max(1, self._add_task_amount // 100)
+        amt_s = font(12, bold=True).render(str(target), True, C_SELECTED)
         surface.blit(amt_s, (fx + 34, fy + 3))
-        amt_lbl = font(11).render("target amount", True, C_TEXT_DIM)
+        unit_lbl = "units" if self._add_task_type == "mine" else "units to build"
+        amt_lbl = font(11).render(unit_lbl, True, C_TEXT_DIM)
         surface.blit(amt_lbl, (fx + 120, fy + 4))
         self._hit_rects.append((dec_r, "dec_amount", None))
         self._hit_rects.append((inc_r, "inc_amount", None))
-        fy += 30
+        fy += 28
+
+        # Resource cost preview for build tasks
+        if self._add_task_type == "build":
+            cost = BUILD_COSTS.get(self._add_task_res, {})
+            if cost:
+                cost_parts = [f"{v:.0f} {k.replace('_', ' ')}" for k, v in cost.items()]
+                cost_str = "Cost/unit: " + " + ".join(cost_parts)
+            else:
+                cost_str = "Cost/unit: free"
+            cost_surf = font(10).render(cost_str, True, C_WARN)
+            surface.blit(cost_surf, (fx, fy))
+            fy += 18
 
         # Confirm button
         conf_r = pygame.Rect(fx, fy, 100, 24)
         pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
-        surface.blit(font(12, bold=True).render("CONFIRM", True, (200, 255, 220)),
-                     font(12, bold=True).render("CONFIRM", True, C_BTN_TXT).get_rect(center=conf_r.center))
+        conf_lbl = font(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+        surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
         self._hit_rects.append((conf_r, "confirm_add_task", None))
 
-        return cy + 175
+        return fy + 32
 
     # ------------------------------------------------------------------
     # Ship panel

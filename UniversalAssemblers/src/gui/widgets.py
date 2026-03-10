@@ -184,7 +184,7 @@ def draw_separator(surface: pygame.Surface, x1: int, y: int, x2: int) -> None:
 # ---------------------------------------------------------------------------
 
 class TextInput:
-    """Single-line text input box. Call handle_event() with ALL events while active."""
+    """Single-line text input box with horizontal scroll. Call handle_event() while active."""
     def __init__(self, rect, initial_text="", font_size=13, max_length=60):
         self.rect = pygame.Rect(rect)
         self.text = initial_text
@@ -193,6 +193,20 @@ class TextInput:
         self._font_size = font_size
         self.max_length = max_length
         self._blink_t = 0
+        self._scroll_x = 0   # horizontal pixel offset so cursor stays visible
+
+    def _clamp_scroll(self, f: pygame.font.Font) -> None:
+        visible_w = self.rect.width - 8
+        cursor_px = f.size(self.text[:self._cursor])[0]
+        # scroll right if cursor beyond right edge
+        if cursor_px - self._scroll_x > visible_w:
+            self._scroll_x = cursor_px - visible_w
+        # scroll left if cursor before left edge
+        if cursor_px - self._scroll_x < 0:
+            self._scroll_x = max(0, cursor_px - 10)
+        # don't scroll past end of text
+        text_w = f.size(self.text)[0]
+        self._scroll_x = max(0, min(self._scroll_x, max(0, text_w - visible_w)))
 
     def handle_event(self, event):
         if not self.active:
@@ -227,14 +241,20 @@ class TextInput:
         border_col = C_ACCENT if self.active else C_BORDER
         pygame.draw.rect(surface, border_col, self.rect, 1, border_radius=3)
         f = font(self._font_size)
+        self._clamp_scroll(f)
         text_surf = f.render(self.text, True, C_TEXT)
-        clip_rect = self.rect.inflate(-6, -4)
+        old_clip = surface.get_clip()
+        clip_rect = pygame.Rect(self.rect.x + 3, self.rect.y + 2,
+                                self.rect.width - 6, self.rect.height - 4)
         surface.set_clip(clip_rect)
-        surface.blit(text_surf, (self.rect.x + 4, self.rect.centery - text_surf.get_height()//2))
+        tx = self.rect.x + 4 - self._scroll_x
+        surface.blit(text_surf, (tx, self.rect.centery - text_surf.get_height() // 2))
         if self.active:
             self._blink_t = (self._blink_t + 1) % 60
             if self._blink_t < 30:
-                cx = self.rect.x + 4 + f.size(self.text[:self._cursor])[0]
-                cx = min(cx, self.rect.right - 6)
-                pygame.draw.line(surface, C_ACCENT, (cx, self.rect.y+3), (cx, self.rect.bottom-3), 1)
-        surface.set_clip(None)
+                cursor_px = self.rect.x + 4 + f.size(self.text[:self._cursor])[0] - self._scroll_x
+                cursor_px = max(self.rect.x + 4, min(cursor_px, self.rect.right - 4))
+                pygame.draw.line(surface, C_ACCENT,
+                                 (cursor_px, self.rect.y + 3),
+                                 (cursor_px, self.rect.bottom - 3), 1)
+        surface.set_clip(old_clip)

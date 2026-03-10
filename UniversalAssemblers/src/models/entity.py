@@ -174,6 +174,35 @@ POWER_PLANT_TYPES: list[StructureType] = list(POWER_PLANT_SPECS.keys())
 
 
 # ---------------------------------------------------------------------------
+# Build costs
+# ---------------------------------------------------------------------------
+# Maps entity type_value → {resource_field: amount_per_unit}
+# Constructors deduct these from the body's resources each time one unit is built.
+
+BUILD_COSTS: dict[str, dict[str, float]] = {
+    # Structures
+    "extractor":               {"minerals": 50,  "rare_minerals": 10},
+    "factory":                 {"minerals": 100, "rare_minerals": 20},
+    "research_array":          {"minerals": 80,  "rare_minerals": 30},
+    "power_plant_solar":       {"minerals": 40,  "rare_minerals": 5},
+    "power_plant_wind":        {"minerals": 40,  "rare_minerals": 5},
+    "power_plant_bios":        {"minerals": 60,  "rare_minerals": 10},
+    "power_plant_fossil":      {"minerals": 80,  "rare_minerals": 15},
+    "power_plant_nuclear":     {"minerals": 120, "rare_minerals": 40},
+    "power_plant_cold_fusion": {"minerals": 200, "rare_minerals": 80},
+    "power_plant_dark_matter": {"minerals": 500, "rare_minerals": 200},
+    "shipyard":                {"minerals": 200, "rare_minerals": 50},
+    "storage_hub":             {"minerals": 60,  "rare_minerals": 10},
+    "replicator":              {"minerals": 300, "rare_minerals": 100},
+    # Bots
+    "miner":                   {"minerals": 20,  "rare_minerals": 5},
+    "constructor":             {"minerals": 20,  "rare_minerals": 5},
+    "worker":                  {"minerals": 15,  "rare_minerals": 2},
+    "harvester":               {"minerals": 25,  "rare_minerals": 5},
+}
+
+
+# ---------------------------------------------------------------------------
 # Starting entity manifest
 # ---------------------------------------------------------------------------
 # (category, type_value, location, count)

@@ -259,12 +259,6 @@ class App:
                     if event.key == pygame.K_SPACE:
                         if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
                             self.game_clock.toggle_pause()
-                    if event.key == pygame.K_t:
-                        if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
-                            if self.tech_view.is_active:
-                                self.close_tech_view()
-                            else:
-                                self.open_tech_view()
                 self.game_clock.handle_event(event)   # speed badge click
 
             # Clock + simulation update
