@@ -1,158 +1,132 @@
 """
-Entity detail view — renders inline in the map panel area.
+Entity detail view — replaces the map panel when an entity row is clicked.
 
-Layout: location-aware header  ▸  info card  ▸  category section
-Right-click or NavPanel selection returns to map view.
+Activated via App.open_entity_view(category, type_value, system_id, body_id).
+Deactivated via App.close_entity_view() or ESC key.
 
-Structure  : power plant I/O stats (or generic info) + research-array tech state
-Bot        : task allocation percentage bars with +/− controls
-Ship
-  probe         : active orders (progress bars) + system dispatch list
-  drop_ship     : active orders + two-step deploy UI (system → body → confirm)
-  mining_vessel : active orders + target-body selector
-  others        : available tasks stub
+Panel layout (right side: NAV_W → WINDOW_WIDTH, TASKBAR_H → TOP_H+TASKBAR_H):
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  TITLE:  <EntityName>   [count]   [X CLOSE]                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  Content area (differs per category / type)                 │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+
+Categories:
+  "structure" — power output, resource I/O, count at location
+  "bot"       — task list with allocation controls and add-task panel
+  "ship"      — travel order queue, send-to system selector
+  "bio"       — bio population stats
 """
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
-
 import pygame
 from .constants import (
-    NAV_W, MAP_W, TOP_H, TASKBAR_H, HEADER_H, PADDING, ROW_H,
-    C_BG, C_PANEL, C_BORDER, C_ACCENT, C_TEXT, C_TEXT_DIM,
-    C_BTN, C_BTN_HOV, C_BTN_TXT, C_SELECTED, C_SEP, C_WARN, C_HOVER, font,
+    NAV_W, MAP_W, TOP_H, TASKBAR_H, HEADER_H, ROW_H, PADDING,
+    C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
+    C_SELECTED, C_HOVER, C_WARN, C_SEP, C_BTN, C_BTN_HOV, C_BTN_TXT,
+    font,
 )
-from .widgets import draw_panel, draw_separator, Button
-from ..models.entity import POWER_PLANT_SPECS, StructureType
-from ..simulation import ShipOrder, SHIP_SPEEDS, system_distance
+from .widgets import draw_panel, draw_separator, Button, ScrollableList
 
 
-_MAP_RECT = pygame.Rect(NAV_W, TASKBAR_H, MAP_W, TOP_H)
+# ---------------------------------------------------------------------------
+# Display metadata
+# ---------------------------------------------------------------------------
 
-_TYPE_NAMES: dict[str, str] = {
-    "extractor":               "Extractor",
-    "factory":                 "Factory",
-    "power_plant_solar":       "Solar Plant",
-    "power_plant_wind":        "Wind Plant",
-    "power_plant_bios":        "Bio Plant",
-    "power_plant_fossil":      "Fossil Plant",
-    "power_plant_nuclear":     "Nuclear Plant",
+_STRUCTURE_NAMES: dict[str, str] = {
+    "extractor":             "Extractor",
+    "factory":               "Factory",
+    "power_plant_solar":     "Solar Farm",
+    "power_plant_wind":      "Wind Farm",
+    "power_plant_bios":      "Bio Plant",
+    "power_plant_fossil":    "Fossil Fuel Plant",
+    "power_plant_nuclear":   "Nuclear Plant",
     "power_plant_cold_fusion": "Cold Fusion Plant",
     "power_plant_dark_matter": "Dark Matter Plant",
-    "research_array":          "Research Array",
-    "replicator":              "Replicator",
-    "shipyard":                "Shipyard",
-    "storage_hub":             "Storage Hub",
-    "worker":                  "Worker Bot",
-    "harvester":               "Harvester Bot",
-    "miner":                   "Miner Bot",
-    "constructor":             "Constructor Bot",
-    "probe":                   "Probe",
-    "drop_ship":               "Drop Ship",
-    "mining_vessel":           "Mining Vessel",
-    "transport":               "Transport",
-    "warship":                 "Warship",
+    "research_array":        "Research Array",
+    "replicator":            "Replicator",
+    "shipyard":              "Shipyard",
+    "storage_hub":           "Storage Hub",
 }
 
-_BOT_TASKS: dict[str, list[str]] = {
-    "worker":      ["Construction", "Maintenance", "Idle"],
-    "harvester":   ["Harvesting", "Idle"],
-    "miner":       ["Mining", "Idle"],
-    "constructor": ["Construction", "Idle"],
+_BOT_NAMES: dict[str, str] = {
+    "worker":      "Worker Bot",
+    "harvester":   "Harvester Bot",
+    "miner":       "Miner Bot",
+    "constructor": "Constructor Bot",
 }
 
-_SHIP_TASKS: dict[str, list[str]] = {
-    "transport": ["Transport Resources", "Transport Entities"],
-    "warship":   ["Patrol", "Attack", "Defend"],
+_SHIP_NAMES: dict[str, str] = {
+    "probe":         "Probe",
+    "drop_ship":     "Drop Ship",
+    "mining_vessel": "Mining Vessel",
+    "transport":     "Transport",
+    "warship":       "Warship",
 }
 
-# Bot task picker options
-_MINE_RESOURCES: list[tuple[str, str]] = [
-    ("minerals",      "Minerals"),
-    ("rare_minerals", "Rare Min."),
-    ("ice",           "Ice"),
-    ("gas",           "Gas"),
-    ("bios",          "Bios"),
-]
-_BUILD_STRUCTURES: list[tuple[str, str]] = [
-    ("extractor",           "Extractor"),
-    ("factory",             "Factory"),
-    ("power_plant_solar",   "Solar Plant"),
-    ("power_plant_wind",    "Wind Plant"),
-    ("power_plant_bios",    "Bio Plant"),
-    ("power_plant_fossil",  "Fossil Plant"),
-    ("power_plant_nuclear", "Nuclear Plant"),
-    ("research_array",      "Research Array"),
-    ("replicator",          "Replicator"),
-    ("shipyard",            "Shipyard"),
-    ("storage_hub",         "Storage Hub"),
-]
-_BUILD_BOTS: list[tuple[str, str]] = [
-    ("worker",      "Worker"),
-    ("harvester",   "Harvester"),
-    ("miner",       "Miner"),
-    ("constructor", "Constructor"),
-]
+_TASK_TYPE_LABELS: dict[str, str] = {
+    "mine":  "Mine",
+    "build": "Build",
+}
 
-_C_TASK_MINE  = (60, 160, 220)    # blue — mining tasks
-_C_TASK_BUILD = (120, 200, 120)   # green — build tasks
+_MINE_RESOURCES = ["minerals", "rare_minerals", "ice", "gas", "bios"]
+_MINE_RES_LABELS = {
+    "minerals":      "Minerals",
+    "rare_minerals": "Rare Minerals",
+    "ice":           "Ice",
+    "gas":           "Gas",
+    "bios":          "Bios",
+}
 
-_C_DISPATCH  = (60, 180, 100)    # green confirm button
-_C_CANCEL    = (180, 70,  60)    # red cancel button
-_C_PROGRESS  = (0, 160, 220)     # in-flight progress bar
-
-
-# ---------------------------------------------------------------------------
-# Deploy UI state for Drop Ship / Mining Vessel
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _DeployState:
-    step:        int      = 0    # 0=idle  1=pick system  2=pick body  3=confirm
-    sys_id:      str | None = None
-    body_id:     str | None = None
-    sys_name:    str      = ""
-    body_name:   str      = ""
-    scroll_off:  int      = 0    # scroll offset for the list
-
-
-# ---------------------------------------------------------------------------
-# EntityView
-# ---------------------------------------------------------------------------
 
 class EntityView:
+    """Overlay that replaces the map panel to show entity details."""
 
     def __init__(self, app) -> None:
-        self.app        = app
-        self.is_active  = False
-        self.category:   str | None = None
-        self.type_value: str | None = None
-        self.system_id:  str | None = None   # system context when opened
-        self.body_id:    str | None = None   # body context (None for ships)
+        self.app      = app
+        self.is_active = False
 
-        # Bot task buttons (registered each draw)
-        self._task_buttons: list[tuple[pygame.Rect, str, int]]  = []   # legacy (unused)
-        self._bot_task_rects: list[tuple[pygame.Rect, str, str]] = []  # (rect, task_id, action)
-        self._bot_picker_btns: list[tuple[pygame.Rect, str]]     = []  # (rect, resource_key)
-        self._bot_target_btns: list[tuple[pygame.Rect, int]]     = []  # (rect, delta)
-        self._bot_add_btn:    pygame.Rect | None = None
-        self._bot_add_confirm: pygame.Rect | None = None
-        self._bot_add_cancel:  pygame.Rect | None = None
-        # Add-task picker state
-        self._bot_add_mode:     bool       = False
-        self._bot_add_resource: str | None = None
-        self._bot_add_target:   int        = 100
+        self._category:    str        = ""
+        self._type_value:  str        = ""
+        self._system_id:   str | None = None
+        self._body_id:     str | None = None
 
-        # Ship dispatch / deploy state
-        self._deploy:        _DeployState = _DeployState()
-        self._dispatch_btns: list[tuple[pygame.Rect, str]]     = []  # (rect, system_id)
-        self._body_btns:     list[tuple[pygame.Rect, str, str]]= []  # (rect, body_id, body_name)
-        self._confirm_btn:   pygame.Rect | None = None
-        self._cancel_btn:    pygame.Rect | None = None
+        self._rect = pygame.Rect(NAV_W, TASKBAR_H, MAP_W, TOP_H)
+
+        self._close_btn = Button(
+            (self._rect.right - 90, self._rect.y + 4, 82, HEADER_H - 6),
+            "✕  CLOSE",
+            callback=self._close,
+            font_size=11,
+        )
+
+        # --- Bot task UI state ---
+        self._add_task_mode:   bool       = False   # True when the add-task form is visible
+        self._add_task_type:   str        = "mine"  # "mine" | "build"
+        self._add_task_res:    str        = "minerals"
+        self._add_task_amount: int        = 100
+        # Hit rects populated each draw: (rect, action, data)
+        self._hit_rects: list[tuple[pygame.Rect, str, object]] = []
+
+        # --- Ship send-to UI state ---
+        self._send_mode:      bool       = False
+        self._send_system_id: str | None = None
+
+        # Scrollable list for system selector
+        sys_sel_rect = pygame.Rect(
+            self._rect.x + PADDING,
+            self._rect.y + HEADER_H + 160,
+            self._rect.width - PADDING * 2,
+            TOP_H - HEADER_H - 170,
+        )
+        self._sys_list = ScrollableList(sys_sel_rect, "Select Destination System",
+                                        on_select=self._on_send_system_select)
 
     # ------------------------------------------------------------------
-    # Lifecycle
+    # Activation
 
     def activate(
         self,
@@ -161,944 +135,579 @@ class EntityView:
         system_id:  str | None = None,
         body_id:    str | None = None,
     ) -> None:
-        self.category   = category
-        self.type_value = type_value
-        self.system_id  = system_id
-        self.body_id    = body_id
-        self.is_active  = True
-        self._task_buttons   = []
-        self._bot_task_rects = []
-        self._bot_picker_btns = []
-        self._bot_target_btns = []
-        self._bot_add_btn     = None
-        self._bot_add_confirm = None
-        self._bot_add_cancel  = None
-        self._bot_add_mode     = False
-        self._bot_add_resource = None
-        self._bot_add_target   = 100
-        self._dispatch_btns  = []
-        self._body_btns      = []
-        self._confirm_btn    = None
-        self._cancel_btn     = None
-        self._deploy         = _DeployState()
+        self.is_active    = True
+        self._category    = category
+        self._type_value  = type_value
+        self._system_id   = system_id
+        self._body_id     = body_id
+        self._add_task_mode = False
+        self._send_mode     = False
+        self._send_system_id = None
+        self._hit_rects      = []
+
+        if category == "ship":
+            self._rebuild_sys_list()
 
     def deactivate(self) -> None:
-        self.is_active  = False
-        self.category   = None
-        self.type_value = None
-        self._deploy    = _DeployState()
+        self.is_active = False
+
+    def _close(self) -> None:
+        self.deactivate()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+
+    def _entity_name(self) -> str:
+        if self._category == "structure":
+            return _STRUCTURE_NAMES.get(self._type_value, self._type_value)
+        if self._category == "bot":
+            return _BOT_NAMES.get(self._type_value, self._type_value)
+        if self._category == "ship":
+            return _SHIP_NAMES.get(self._type_value, self._type_value)
+        return self._type_value.replace("_", " ").title()
+
+    def _count_at_location(self) -> int:
+        gs = self.app.game_state
+        if not gs:
+            return 0
+        loc = self._body_id or self._system_id
+        if not loc:
+            return gs.entity_roster.total(self._category, self._type_value)
+        return sum(
+            i.count for i in gs.entity_roster.at(loc)
+            if i.category == self._category and i.type_value == self._type_value
+        )
+
+    def _rebuild_sys_list(self) -> None:
+        gs = self.app.game_state
+        galaxy = self.app.galaxy
+        if not gs or not galaxy:
+            return
+        from ..game_state import DiscoveryState
+        items = [
+            (s.name, s.id, None)
+            for s in galaxy.solar_systems
+            if gs.get_state(s.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
+               and s.id != self._system_id
+        ]
+        self._sys_list.set_items(items)
+
+    def _on_send_system_select(self, sys_id: str) -> None:
+        self._send_system_id = sys_id
 
     # ------------------------------------------------------------------
     # Events
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-                if _MAP_RECT.collidepoint(event.pos):
-                    self.deactivate()
-                    return
+            self._close_btn.handle_event(event)
 
-            if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
-                continue
+            if self._category == "bot":
+                self._handle_bot_events(event)
+            elif self._category == "ship":
+                self._sys_list.handle_event(event)
+                self._handle_ship_events(event)
 
-            pos = event.pos
-
-            # Bot task management (alloc +/−, remove)
-            for rect, task_id, action in self._bot_task_rects:
-                if rect.collidepoint(pos):
-                    gs = self.app.game_state
-                    if gs and self.type_value:
-                        loc = self.body_id or self.system_id or ""
-                        if action == "remove":
-                            gs.bot_tasks.remove(loc, self.type_value, task_id)
-                        elif action.startswith("alloc"):
-                            delta = int(action.split(":")[1])
-                            gs.bot_tasks.adjust_allocation(loc, self.type_value, task_id, delta)
-                    return
-
-            # Bot add-task picker
-            for rect, value in self._bot_picker_btns:
-                if rect.collidepoint(pos):
-                    self._bot_add_resource = value
-                    return
-
-            # Bot add-task target amount +/−
-            for rect, delta in self._bot_target_btns:
-                if rect.collidepoint(pos):
-                    self._bot_add_target = max(1, self._bot_add_target + delta)
-                    return
-
-            # Bot add-task confirm
-            if self._bot_add_confirm and self._bot_add_confirm.collidepoint(pos):
-                self._do_add_bot_task()
+    def _handle_bot_events(self, event: pygame.event.Event) -> None:
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        pos = event.pos
+        for rect, action, data in self._hit_rects:
+            if rect.collidepoint(pos):
+                self._dispatch_bot_action(action, data)
                 return
 
-            # Bot add-task cancel / add button
-            if self._bot_add_cancel and self._bot_add_cancel.collidepoint(pos):
-                self._bot_add_mode     = False
-                self._bot_add_resource = None
-                self._bot_add_target   = 100
-                return
-            if self._bot_add_btn and self._bot_add_btn.collidepoint(pos):
-                self._bot_add_mode = True
-                return
-
-            # System dispatch / step-1 select (probe dispatches immediately;
-            # drop_ship / mining_vessel advance to body/confirm step)
-            for rect, sys_id in self._dispatch_btns:
-                if rect.collidepoint(pos):
-                    if self.type_value == "probe":
-                        self._dispatch_probe(sys_id)
-                    else:
-                        sys_obj = None
-                        if self.app.galaxy:
-                            sys_obj = next(
-                                (s for s in self.app.galaxy.solar_systems if s.id == sys_id),
-                                None,
-                            )
-                        self._deploy.sys_id   = sys_id
-                        self._deploy.sys_name = sys_obj.name if sys_obj else sys_id
-                        # Drop ship needs body selection; mining vessel goes straight to confirm
-                        self._deploy.step = 2 if self.type_value == "drop_ship" else 3
-                    return
-
-            # Drop ship / mining vessel body buttons
-            for rect, body_id, body_name in self._body_btns:
-                if rect.collidepoint(pos):
-                    self._deploy.body_id   = body_id
-                    self._deploy.body_name = body_name
-                    self._deploy.step      = 3
-                    return
-
-            # Cancel button
-            if self._cancel_btn and self._cancel_btn.collidepoint(pos):
-                self._deploy = _DeployState()
-                return
-
-            # Confirm button
-            if self._confirm_btn and self._confirm_btn.collidepoint(pos):
-                self._confirm_dispatch()
-                return
-
-    # ------------------------------------------------------------------
-    # Bot task logic
-
-    def _do_add_bot_task(self) -> None:
-        from ..game_state import BotTask
+    def _dispatch_bot_action(self, action: str, data: object) -> None:
         gs = self.app.game_state
-        if not gs or not self._bot_add_resource or not self.type_value:
+        if not gs:
             return
-        loc_id = self.body_id or self.system_id
-        if not loc_id:
+        loc = self._body_id or self._system_id or ""
+
+        if action == "toggle_add_task":
+            self._add_task_mode = not self._add_task_mode
+
+        elif action == "set_task_type":
+            self._add_task_type = str(data)
+
+        elif action == "set_res":
+            self._add_task_res = str(data)
+
+        elif action == "inc_amount":
+            self._add_task_amount = min(99999, self._add_task_amount + 100)
+
+        elif action == "dec_amount":
+            self._add_task_amount = max(100, self._add_task_amount - 100)
+
+        elif action == "confirm_add_task":
+            from ..game_state import BotTask
+            if self._add_task_type == "mine":
+                task = BotTask(
+                    task_type="mine",
+                    resource=self._add_task_res,
+                    entity_type=None,
+                    target_amount=self._add_task_amount,
+                )
+            else:
+                task = BotTask(
+                    task_type="build",
+                    resource=None,
+                    entity_type=self._add_task_res,   # reusing field for entity type
+                    target_amount=max(1, self._add_task_amount // 100),
+                )
+            gs.bot_tasks.add(loc, self._type_value, task)
+            self._add_task_mode = False
+
+        elif action == "remove_task":
+            task_id = str(data)
+            gs.bot_tasks.remove(loc, self._type_value, task_id)
+
+        elif action == "alloc_inc":
+            task_id, _ = data  # type: ignore
+            gs.bot_tasks.adjust_allocation(loc, self._type_value, str(task_id), +10)
+
+        elif action == "alloc_dec":
+            task_id, _ = data  # type: ignore
+            gs.bot_tasks.adjust_allocation(loc, self._type_value, str(task_id), -10)
+
+    def _handle_ship_events(self, event: pygame.event.Event) -> None:
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
             return
-        bot_type  = self.type_value
-        is_build  = bot_type in ("constructor", "worker")
-        task_type = "build" if is_build else "mine"
-        task = BotTask(
-            task_type=task_type,
-            resource=None if is_build else self._bot_add_resource,
-            entity_type=self._bot_add_resource if is_build else None,
-            target_amount=self._bot_add_target,
-            allocation=10,
-        )
-        gs.bot_tasks.add(loc_id, bot_type, task)
-        self._bot_add_mode     = False
-        self._bot_add_resource = None
-        self._bot_add_target   = 100
+        pos = event.pos
+        for rect, action, data in self._hit_rects:
+            if rect.collidepoint(pos):
+                if action == "toggle_send":
+                    self._send_mode = not self._send_mode
+                    if self._send_mode:
+                        self._rebuild_sys_list()
+                elif action == "dispatch_ship":
+                    self._dispatch_ship()
+                return
 
-    # ------------------------------------------------------------------
-    # Ship dispatch logic
-
-    def _dispatch_probe(self, target_sys_id: str) -> None:
+    def _dispatch_ship(self) -> None:
+        if not self._send_system_id:
+            return
         gs = self.app.game_state
-        if not gs or not self.system_id:
+        galaxy = self.app.galaxy
+        if not gs or not galaxy:
             return
-        loc = self.system_id
-        if gs.entity_roster.total("ship", "probe") < 1:
+        count = gs.entity_roster.total(self._category, self._type_value)
+        if count == 0:
             return
-        # Deduct one probe from this system (or globally if not found here)
-        at_loc = sum(
-            i.count for i in gs.entity_roster.at(loc)
-            if i.type_value == "probe"
+        # Find first body in target system
+        target_sys = next(
+            (s for s in galaxy.solar_systems if s.id == self._send_system_id), None
         )
-        if at_loc < 1:
-            return
-        gs.entity_roster.remove("ship", "probe", loc, 1)
-        dist = system_distance(gs.galaxy, loc, target_sys_id)
+        target_body_id = (
+            target_sys.orbital_bodies[0].id if target_sys and target_sys.orbital_bodies
+            else None
+        )
+        from ..simulation import ShipOrder
         order = ShipOrder(
-            ship_type="probe",
-            order_type="explore",
-            origin_system_id=loc,
-            origin_location_id=loc,
-            target_system_id=target_sys_id,
-            target_body_id=None,
-            distance_ly=dist,
+            order_type="travel",
+            target_system_id=self._send_system_id,
+            target_body_id=target_body_id,
         )
-        gs.order_queue.add(order)
-
-    def _confirm_dispatch(self) -> None:
-        gs = self.app.game_state
-        if not gs or not self.system_id or not self._deploy.sys_id:
-            return
-        ship = self.type_value
-        loc  = self.system_id
-        at_loc = sum(
-            i.count for i in gs.entity_roster.at(loc)
-            if i.type_value == ship
-        )
-        if at_loc < 1:
-            return
-        gs.entity_roster.remove("ship", ship, loc, 1)
-        dist = system_distance(gs.galaxy, loc, self._deploy.sys_id)
-        order = ShipOrder(
-            ship_type=ship,
-            order_type="deploy" if ship == "drop_ship" else "mine",
-            origin_system_id=loc,
-            origin_location_id=loc,
-            target_system_id=self._deploy.sys_id,
-            target_body_id=self._deploy.body_id,
-            distance_ly=dist,
-        )
-        gs.order_queue.add(order)
-        self._deploy = _DeployState()
+        loc = self._system_id or ""
+        gs.order_queue.enqueue(loc, self._type_value, order)
+        self._send_mode = False
+        self._send_system_id = None
+        self.deactivate()
 
     # ------------------------------------------------------------------
     # Draw
 
     def draw(self, surface: pygame.Surface) -> None:
-        content = draw_panel(surface, _MAP_RECT, self._build_title())
+        self._hit_rects = []
+        content = draw_panel(surface, self._rect, None)
 
-        # Right-click hint (top-right of header area)
-        hint = font(10).render("Right-click to return to map", True, C_TEXT_DIM)
-        surface.blit(hint, (_MAP_RECT.right - hint.get_width() - PADDING, _MAP_RECT.y + 8))
+        # Title bar
+        hdr = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, HEADER_H)
+        pygame.draw.rect(surface, C_HEADER, hdr)
+        name = self._entity_name()
+        count = self._count_at_location()
+        title_surf = font(13, bold=True).render(
+            f"{name.upper()}  ×{count}", True, C_ACCENT
+        )
+        surface.blit(title_surf, (self._rect.x + PADDING, self._rect.y + 6))
+        self._close_btn.draw(surface)
 
-        y = self._draw_info_card(surface, content)
-        draw_separator(surface, content.x + PADDING, y, content.right - PADDING)
-        y += 8
+        draw_separator(surface, self._rect.x + PADDING, self._rect.y + HEADER_H,
+                       self._rect.right - PADDING)
 
-        # Clip content to panel
+        # Content
+        cx = self._rect.x + PADDING
+        cy = self._rect.y + HEADER_H + 10
+
         old_clip = surface.get_clip()
-        surface.set_clip(content.inflate(0, 0))
+        surface.set_clip(pygame.Rect(
+            self._rect.x, self._rect.y + HEADER_H,
+            self._rect.width, self._rect.height - HEADER_H,
+        ))
 
-        if self.category == "structure":
-            self._draw_structure(surface, content, y)
-        elif self.category == "bot":
-            self._draw_bot(surface, content, y)
-        elif self.category == "ship":
-            self._draw_ship(surface, content, y)
+        if self._category == "structure":
+            cy = self._draw_structure(surface, cx, cy)
+        elif self._category == "bot":
+            cy = self._draw_bot(surface, cx, cy)
+        elif self._category == "ship":
+            cy = self._draw_ship(surface, cx, cy)
+        elif self._category == "bio":
+            cy = self._draw_bio(surface, cx, cy)
 
         surface.set_clip(old_clip)
 
     # ------------------------------------------------------------------
-    # Title / header
+    # Structure panel
 
-    def _build_title(self) -> str:
-        name = _TYPE_NAMES.get(self.type_value or "", self.type_value or "")
-        if not self.app.galaxy or not self.system_id:
-            return name
-        sys = next(
-            (s for s in self.app.galaxy.solar_systems if s.id == self.system_id),
-            None,
-        )
-        sys_name = sys.name if sys else self.system_id
+    def _draw_structure(self, surface: pygame.Surface, cx: int, cy: int) -> int:
+        from ..models.entity import POWER_PLANT_SPECS, StructureType
 
-        if self.body_id and sys:
-            # Find the body name
-            for body in sys.orbital_bodies:
-                if body.id == self.body_id:
-                    return f"{name}  ·  {body.name},  {sys_name}"
-                for moon in body.moons:
-                    if moon.id == self.body_id:
-                        return f"{name}  ·  {moon.name},  {sys_name}"
-        return f"{name}  ·  {sys_name}"
+        def txt(label: str, value: str, vcol=C_TEXT) -> None:
+            nonlocal cy
+            l = font(12).render(label, True, C_TEXT_DIM)
+            v = font(12, bold=True).render(value, True, vcol)
+            surface.blit(l, (cx, cy))
+            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
+            cy += ROW_H
 
-    def _draw_info_card(self, surface: pygame.Surface, content: pygame.Rect) -> int:
-        """Draw the category / count row. Returns the y position after the card."""
-        gs     = self.app.game_state
-        roster = gs.entity_roster if gs else None
+        loc = self._body_id or self._system_id
+        txt("Location", loc or "—", C_TEXT_DIM)
 
-        # Location-scoped count
-        loc_id  = self.body_id or self.system_id
-        if roster and loc_id:
-            here  = sum(
-                i.count for i in roster.at(loc_id)
-                if i.type_value == self.type_value
-            )
-        else:
-            here = 0
-        total = roster.total(self.category or "", self.type_value or "") if roster else 0
-
-        y = content.y + 4
-        surface.blit(
-            font(11).render(f"Category : {(self.category or '').capitalize()}", True, C_TEXT_DIM),
-            (content.x + PADDING, y),
-        )
-        y += ROW_H
-        here_str  = f"Here: {here}"
-        total_str = f"Total: {total}"
-        surface.blit(font(11).render(here_str,  True, C_ACCENT),   (content.x + PADDING, y))
-        surface.blit(font(11).render(total_str, True, C_TEXT_DIM), (content.x + PADDING + 110, y))
-        y += ROW_H + 4
-        return y
-
-    # ------------------------------------------------------------------
-    # Structure section
-
-    def _draw_structure(
-        self, surface: pygame.Surface, content: pygame.Rect, y: int
-    ) -> None:
-        if self.type_value == "research_array":
-            self._draw_research_array(surface, content, y)
-            return
-
+        # Power plant details
         try:
-            st   = StructureType(self.type_value)
-            spec = POWER_PLANT_SPECS.get(st)
+            st = StructureType(self._type_value)
         except ValueError:
-            spec = None
-
-        gs     = self.app.game_state
-        roster = gs.entity_roster if gs else None
-        loc_id = self.body_id or self.system_id
-        count  = sum(
-            i.count for i in (roster.at(loc_id) if roster and loc_id else [])
-            if i.type_value == self.type_value
-        )
-
-        if spec:
-            surface.blit(
-                font(12, bold=True).render("Power Plant", True, C_ACCENT),
-                (content.x + PADDING, y),
-            )
-            y += ROW_H + 4
-            total_out = spec.base_output * count
-            rows = [
-                ("Output/plant",  f"{spec.base_output:.0f} EU/yr"),
-                ("Active plants", str(count)),
-                ("Total output",  f"{total_out:.0f} EU/yr"),
-                ("Renewable",     "Yes" if spec.renewable else "No"),
-            ]
+            st = None
+        if st and st in POWER_PLANT_SPECS:
+            spec = POWER_PLANT_SPECS[st]
+            cy += 8
+            sep_y = cy
+            draw_separator(surface, cx, sep_y, self._rect.right - PADDING * 2)
+            lbl = font(11, bold=True).render("POWER PLANT", True, C_ACCENT)
+            surface.blit(lbl, (cx, sep_y + 3))
+            cy += 18
+            txt("Output (per unit/yr)", f"{spec.base_output:,.0f}", C_WARN)
+            txt("Renewable", "Yes" if spec.renewable else "No",
+                (80, 200, 100) if spec.renewable else C_WARN)
             if spec.input_resource:
-                rows += [
-                    ("Consumes",    spec.input_resource),
-                    ("Rate/plant",  f"{spec.input_rate:.0f} units/yr"),
-                    ("Total rate",  f"{spec.input_rate * count:.0f} units/yr"),
-                ]
-            if spec.unlocked_by:
-                rows.append(("Tech required", spec.unlocked_by))
+                txt("Consumes", spec.input_resource.replace("_", " ").title(), C_WARN)
+                txt("Rate (per unit/yr)", f"{spec.input_rate:.1f}")
 
-            for label, value in rows:
-                ls = font(11).render(f"{label:<14}:", True, C_TEXT_DIM)
-                vs = font(11).render(value, True, C_TEXT)
-                surface.blit(ls, (content.x + PADDING, y))
-                surface.blit(vs, (content.x + PADDING + ls.get_width() + 6, y))
-                y += ROW_H
+        # Research Array note
+        if self._type_value == "research_array":
+            cy += 8
+            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+            lbl = font(11, bold=True).render("RESEARCH", True, C_ACCENT)
+            surface.blit(lbl, (cx, cy + 3))
+            cy += 18
+            note = font(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
+            surface.blit(note, (cx, cy))
+            cy += ROW_H
+            note2 = font(12).render("Open the Tech Tree (T) to assign research.", True, C_TEXT_DIM)
+            surface.blit(note2, (cx, cy))
+            cy += ROW_H
 
-            if not spec.renewable:
-                y += 4
-                warn = font(10).render(
-                    f"⚠  Non-renewable — requires {spec.input_resource} deposits.",
-                    True, C_WARN,
-                )
-                surface.blit(warn, (content.x + PADDING, y))
-        else:
-            surface.blit(
-                font(11).render("No detailed stats for this structure.", True, C_TEXT_DIM),
-                (content.x + PADDING, y),
-            )
-
-    def _draw_research_array(
-        self, surface: pygame.Surface, content: pygame.Rect, y: int
-    ) -> None:
-        from ..models.tech import TECH_TREE
-
-        surface.blit(
-            font(12, bold=True).render("Research Array", True, C_ACCENT),
-            (content.x + PADDING, y),
-        )
-        y += ROW_H + 4
-
-        tech = self.app.game_state.tech if self.app.game_state else None
-        in_progress = tech.in_progress_ids() if tech else []
-
-        # In Progress
-        surface.blit(font(11, bold=True).render("In Progress", True, C_TEXT), (content.x + PADDING, y))
-        y += ROW_H
-        bar_w = content.width - PADDING * 2 - 120
-        if in_progress:
-            for tid in in_progress:
-                node = TECH_TREE.get(tid)
-                frac = tech.progress_fraction(tid) if tech else 0.0
-                name = node.name if node else tid
-                surface.blit(font(11).render(name, True, C_TEXT), (content.x + PADDING, y))
-                bx = content.x + PADDING + 200
-                pygame.draw.rect(surface, C_BTN, pygame.Rect(bx, y + 4, bar_w, ROW_H - 6), border_radius=3)
-                if frac > 0:
-                    pygame.draw.rect(surface, C_ACCENT, pygame.Rect(bx, y + 4, int(bar_w * frac), ROW_H - 6), border_radius=3)
-                surface.blit(font(11, bold=True).render(f"{int(frac*100)}%", True, C_SELECTED), (bx + bar_w + 6, y + 2))
-                y += ROW_H + 2
-        else:
-            surface.blit(font(11).render("None active.", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H
-
-        y += 4; draw_separator(surface, content.x + PADDING, y, content.right - PADDING); y += 8
-
-        # Completed
-        researched = tech.researched if tech else set()
-        surface.blit(font(11, bold=True).render("Completed", True, C_TEXT), (content.x + PADDING, y)); y += ROW_H
-        if researched:
-            col_w = content.width // 2
-            for i, tid in enumerate(sorted(researched)):
-                node = TECH_TREE.get(tid)
-                name = node.name if node else tid
-                cx   = content.x + PADDING + (i % 2) * col_w
-                surface.blit(font(10).render(f"✓  {name}", True, (80, 200, 120)), (cx, y))
-                if i % 2 == 1:
-                    y += ROW_H
-            if len(researched) % 2 == 1:
-                y += ROW_H
-        else:
-            surface.blit(font(11).render("None yet.", True, C_TEXT_DIM), (content.x + PADDING + 8, y)); y += ROW_H
-
-        y += 4; draw_separator(surface, content.x + PADDING, y, content.right - PADDING); y += 8
-
-        # Available
-        surface.blit(font(11, bold=True).render("Available to Research", True, C_TEXT), (content.x + PADDING, y)); y += ROW_H
-        available = [
-            tid for tid in TECH_TREE
-            if tech and tech.can_research(tid) and tid not in in_progress
-        ]
-        if available:
-            for tid in available:
-                node = TECH_TREE.get(tid)
-                name = node.name if node else tid
-                cost = f"{node.research_cost:.0f} pts" if node else ""
-                surface.blit(font(11).render(f"◉  {name}  ({cost})", True, C_TEXT), (content.x + PADDING + 8, y))
-                y += ROW_H
-                if y + ROW_H > content.bottom - ROW_H:
-                    break
-        else:
-            surface.blit(font(11).render("None — check prerequisites.", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-
-        # Count note at bottom
-        gs    = self.app.game_state
-        count = gs.entity_roster.total("structure", "research_array") if gs else 0
-        note  = font(10).render(
-            f"{count} Research Array{'s' if count != 1 else ''} — each can work on a separate tech simultaneously.",
-            True, C_TEXT_DIM,
-        )
-        surface.blit(note, (content.x + PADDING, content.bottom - ROW_H - 4))
+        return cy
 
     # ------------------------------------------------------------------
-    # Bot section
+    # Bot panel
 
-    def _draw_bot(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        self._bot_task_rects  = []
-        self._bot_picker_btns = []
-        self._bot_target_btns = []
-        self._bot_add_btn     = None
-        self._bot_add_confirm = None
-        self._bot_add_cancel  = None
-
-        gs       = self.app.game_state
-        bot_type = self.type_value or ""
-        loc_id   = self.body_id or self.system_id or ""
-
-        # Bot count at location
-        bot_count = sum(
-            i.count for i in (gs.entity_roster.at(loc_id) if gs else [])
-            if i.category == "bot" and i.type_value == bot_type
-        )
-        is_builder = bot_type in ("constructor", "worker")
-
-        # Header: task type label
-        lbl = "Build Tasks" if is_builder else "Mining Tasks"
-        surface.blit(
-            font(12, bold=True).render(lbl, True, C_ACCENT),
-            (content.x + PADDING, y),
-        )
-        cnt_txt = font(11).render(f"  ({bot_count} bot{'s' if bot_count != 1 else ''} here)", True, C_TEXT_DIM)
-        surface.blit(cnt_txt, (content.x + PADDING + 120, y + 2))
-        y += ROW_H + 2
-
-        tasks = gs.bot_tasks.get(loc_id, bot_type) if gs else []
-
-        if not tasks:
-            surface.blit(
-                font(11).render("No tasks assigned.", True, C_TEXT_DIM),
-                (content.x + PADDING + 8, y + 2),
-            )
-            y += ROW_H
-        else:
-            bar_w      = content.width - PADDING * 2 - 200
-            alloc_bar_w = 80
-            mouse      = pygame.mouse.get_pos()
-            for task in tasks:
-                if y + ROW_H + 4 > content.bottom - 70:
-                    break
-                c = _C_TASK_BUILD if is_builder else _C_TASK_MINE
-
-                # Task name
-                if task.task_type == "mine":
-                    name = f"Mine  {task.resource or '?'}"
-                elif task.entity_type:
-                    name = f"Build  {_TYPE_NAMES.get(task.entity_type, task.entity_type)}"
-                else:
-                    name = "Build"
-                surface.blit(font(11).render(name, True, c), (content.x + PADDING, y + 2))
-
-                # Allocation bar (small)
-                abx = content.x + PADDING + 180
-                pygame.draw.rect(surface, C_BTN, pygame.Rect(abx, y + 6, alloc_bar_w, ROW_H - 10), border_radius=2)
-                fw = int(alloc_bar_w * task.allocation / 100)
-                if fw:
-                    pygame.draw.rect(surface, c, pygame.Rect(abx, y + 6, fw, ROW_H - 10), border_radius=2)
-                surface.blit(
-                    font(10, bold=True).render(f"{task.allocation}%", True, C_SELECTED),
-                    (abx + alloc_bar_w + 4, y + 4),
-                )
-
-                # Progress display
-                if task.task_type == "mine":
-                    prog_str = f"{task.progress:.0f}/{task.target_amount}"
-                else:
-                    prog_str = f"{task.built_count}/{task.target_amount} built"
-                surface.blit(font(10).render(prog_str, True, C_TEXT_DIM), (abx + alloc_bar_w + 44, y + 4))
-
-                # − / + / ✕ buttons
-                bx_ctrl = content.right - PADDING - 62
-                minus_r = pygame.Rect(bx_ctrl,      y + 3, 18, ROW_H - 6)
-                plus_r  = pygame.Rect(bx_ctrl + 22, y + 3, 18, ROW_H - 6)
-                rem_r   = pygame.Rect(bx_ctrl + 44, y + 3, 18, ROW_H - 6)
-                for btn_r, lbl_ch in ((minus_r, "−"), (plus_r, "+"), (rem_r, "✕")):
-                    bg = C_BTN_HOV if btn_r.collidepoint(mouse) else C_BTN
-                    pygame.draw.rect(surface, bg, btn_r, border_radius=3)
-                    ch = font(10, bold=True).render(lbl_ch, True, C_BTN_TXT)
-                    surface.blit(ch, ch.get_rect(center=btn_r.center))
-                self._bot_task_rects.append((minus_r, task.task_id, "alloc:-10"))
-                self._bot_task_rects.append((plus_r,  task.task_id, "alloc:+10"))
-                self._bot_task_rects.append((rem_r,   task.task_id, "remove"))
-
-                y += ROW_H + 4
-
-        # Idle % display
-        used_alloc = sum(t.allocation for t in tasks)
-        idle_pct   = max(0, 100 - used_alloc)
-        draw_separator(surface, content.x + PADDING, y, content.right - PADDING)
-        y += 6
-        surface.blit(
-            font(11).render(f"Idle: {idle_pct}%  (allocated: {used_alloc}%)", True, C_TEXT_DIM),
-            (content.x + PADDING, y),
-        )
-        y += ROW_H + 4
-        draw_separator(surface, content.x + PADDING, y, content.right - PADDING)
-        y += 8
-
-        # Add Task section
-        if self._bot_add_mode:
-            self._draw_bot_add_picker(surface, content, y, is_builder)
-        else:
-            add_r = pygame.Rect(content.x + PADDING, y, 140, 24)
-            mouse = pygame.mouse.get_pos()
-            bg = C_BTN_HOV if add_r.collidepoint(mouse) else C_BTN
-            pygame.draw.rect(surface, bg, add_r, border_radius=4)
-            lbl_text = "+ Add Build Task" if is_builder else "+ Add Mining Task"
-            surface.blit(font(11).render(lbl_text, True, C_BTN_TXT), (add_r.x + 8, add_r.y + 4))
-            self._bot_add_btn = add_r
-
-    def _draw_bot_add_picker(
-        self, surface: pygame.Surface, content: pygame.Rect, y: int, is_builder: bool
-    ) -> None:
-        options = (_BUILD_STRUCTURES + _BUILD_BOTS) if is_builder else _MINE_RESOURCES
-        lbl_hdr = "Select what to build:" if is_builder else "Select resource to mine:"
-        surface.blit(font(11, bold=True).render(lbl_hdr, True, C_TEXT), (content.x + PADDING, y))
-        y += ROW_H + 2
-
-        mouse = pygame.mouse.get_pos()
-        btn_w = 110
-        btn_h = 22
-        cols  = max(1, (content.width - PADDING * 2) // (btn_w + 4))
-        col   = 0
-        row_y = y
-        for key, display in options:
-            if row_y + btn_h > content.bottom - 60:
-                break
-            bx = content.x + PADDING + col * (btn_w + 4)
-            btn_r = pygame.Rect(bx, row_y, btn_w, btn_h)
-            selected = self._bot_add_resource == key
-            bg = C_ACCENT if selected else (C_BTN_HOV if btn_r.collidepoint(mouse) else C_BTN)
-            pygame.draw.rect(surface, bg, btn_r, border_radius=3)
-            txt_c = (0, 0, 0) if selected else C_BTN_TXT
-            surf  = font(10).render(display, True, txt_c)
-            surface.blit(surf, surf.get_rect(center=btn_r.center))
-            self._bot_picker_btns.append((btn_r, key))
-            col += 1
-            if col >= cols:
-                col    = 0
-                row_y += btn_h + 3
-
-        y = row_y + btn_h + 8
-
-        # Target amount row
-        surface.blit(font(11).render("Target amount:", True, C_TEXT_DIM), (content.x + PADDING, y + 3))
-        minus_r = pygame.Rect(content.x + PADDING + 130, y, 22, 22)
-        plus_r  = pygame.Rect(content.x + PADDING + 186, y, 22, 22)
-        for btn_r, lbl_ch, delta in ((minus_r, "−", -10), (plus_r, "+", +10)):
-            bg = C_BTN_HOV if btn_r.collidepoint(mouse) else C_BTN
-            pygame.draw.rect(surface, bg, btn_r, border_radius=3)
-            ch_surf = font(11, bold=True).render(lbl_ch, True, C_BTN_TXT)
-            surface.blit(ch_surf, ch_surf.get_rect(center=btn_r.center))
-            self._bot_target_btns.append((btn_r, delta))
-        surface.blit(
-            font(12, bold=True).render(str(self._bot_add_target), True, C_SELECTED),
-            (content.x + PADDING + 156, y + 2),
-        )
-        y += 30
-
-        # Confirm / Cancel
-        conf_r = pygame.Rect(content.x + PADDING, y, 90, 24)
-        can_r  = pygame.Rect(content.x + PADDING + 100, y, 70, 24)
-        can_draw = self._bot_add_resource is not None
-        bg_conf = _C_DISPATCH if can_draw else (40, 60, 40)
-        pygame.draw.rect(surface, bg_conf, conf_r, border_radius=4)
-        pygame.draw.rect(surface, C_BTN_HOV, can_r, border_radius=4)
-        surface.blit(font(11).render("Assign", True, C_BTN_TXT), (conf_r.x + 8, conf_r.y + 4))
-        surface.blit(font(11).render("Cancel", True, C_BTN_TXT), (can_r.x + 8,  can_r.y + 4))
-        if can_draw:
-            self._bot_add_confirm = conf_r
-        self._bot_add_cancel = can_r
-
-    # ------------------------------------------------------------------
-    # Ship section
-
-    def _draw_ship(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        tv = self.type_value or ""
-        if tv == "probe":
-            self._draw_probe(surface, content, y)
-        elif tv == "drop_ship":
-            self._draw_drop_ship(surface, content, y)
-        elif tv == "mining_vessel":
-            self._draw_mining_vessel(surface, content, y)
-        else:
-            self._draw_ship_generic(surface, content, y)
-
-    # -- Probe --
-
-    def _draw_probe(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        self._dispatch_btns = []
-        gs = self.app.game_state
-
-        # Active orders
-        surface.blit(font(12, bold=True).render("Probes In Transit", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-        orders = [
-            o for o in (gs.order_queue.active() if gs else [])
-            if o.ship_type == "probe"
-        ]
-        if orders:
-            bar_w = content.width - PADDING * 2 - 180
-            for o in orders:
-                sys_name = self._sys_name(o.target_system_id)
-                label    = f"→ {sys_name}"
-                eta_str  = f"ETA {o.eta_years:.1f} yr"
-                surface.blit(font(11).render(label,   True, C_TEXT),     (content.x + PADDING, y))
-                surface.blit(font(11).render(eta_str, True, C_TEXT_DIM), (content.x + PADDING + 200, y))
-                bx = content.x + PADDING + 310
-                pygame.draw.rect(surface, C_BTN, pygame.Rect(bx, y + 4, bar_w, ROW_H - 6), border_radius=3)
-                fw = int(bar_w * o.fraction)
-                if fw:
-                    pygame.draw.rect(surface, _C_PROGRESS, pygame.Rect(bx, y + 4, fw, ROW_H - 6), border_radius=3)
-                surface.blit(font(10).render(f"{int(o.fraction*100)}%", True, C_SELECTED), (bx + bar_w + 6, y + 4))
-                y += ROW_H + 2
-        else:
-            surface.blit(font(11).render("No probes in transit.", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H
-
-        y += 6; draw_separator(surface, content.x + PADDING, y, content.right - PADDING); y += 8
-
-        # Dispatch list
-        surface.blit(font(12, bold=True).render("Send Probe to System", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-
-        here = self._count_here("ship", "probe")
-        if here < 1:
-            surface.blit(font(11).render("No probes available at this location.", True, C_WARN), (content.x + PADDING + 8, y))
-            return
-
-        surface.blit(
-            font(11).render(f"Available here: {here}  — click a system to dispatch", True, C_TEXT_DIM),
-            (content.x + PADDING + 8, y),
-        )
-        y += ROW_H + 2
-
-        if not gs or not gs.galaxy or not self.system_id:
-            return
-
-        from ..game_state import DiscoveryState
-        col_w = content.width // 2
-
-        for i, sys in enumerate(gs.galaxy.solar_systems):
-            if y + ROW_H > content.bottom - PADDING:
-                break
-            if sys.id == self.system_id:
-                continue
-            state = gs.get_state(sys.id)
-            dist  = system_distance(gs.galaxy, self.system_id, sys.id)
-            speed = SHIP_SPEEDS["probe"]
-
-            col = C_TEXT
-            if state in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
-                state_str = "explored"
-            elif state == DiscoveryState.DETECTED:
-                state_str = "detected"
-                col = C_TEXT_DIM
-            else:
-                state_str = "unknown"
-                col = (60, 70, 90)
-
-            already_en_route = any(
-                o.target_system_id == sys.id and o.ship_type == "probe"
-                for o in gs.order_queue.active()
-            )
-            label = f"{'→' if already_en_route else '◉'}  {sys.name}  ({dist:.0f} ly  ·  {dist/speed:.1f} yr)"
-
-            btn_r = pygame.Rect(content.x + PADDING + 8, y, content.width - PADDING * 2 - 16, ROW_H)
-            mouse = pygame.mouse.get_pos()
-            if btn_r.collidepoint(mouse) and not already_en_route and col != (60, 70, 90):
-                pygame.draw.rect(surface, C_HOVER, btn_r, border_radius=2)
-
-            surface.blit(font(11).render(label, True, col), (btn_r.x + 4, y + 2))
-            surface.blit(font(10).render(state_str, True, C_TEXT_DIM), (btn_r.right - 80, y + 4))
-
-            if not already_en_route and state != DiscoveryState.UNKNOWN:
-                self._dispatch_btns.append((btn_r, sys.id))
-
-            y += ROW_H + 1
-
-    # -- Drop Ship --
-
-    def _draw_drop_ship(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        self._body_btns  = []
-        self._cancel_btn = None
-        self._confirm_btn = None
-        gs = self.app.game_state
-
-        # Active orders
-        surface.blit(font(12, bold=True).render("Drop Ships In Transit", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-        orders = [o for o in (gs.order_queue.active() if gs else []) if o.ship_type == "drop_ship"]
-        if orders:
-            for o in orders:
-                sys_name  = self._sys_name(o.target_system_id)
-                body_name = o.target_body_id or sys_name
-                label    = f"→ {body_name} in {sys_name}"
-                eta_str  = f"ETA {o.eta_years:.1f} yr"
-                bar_w    = content.width - PADDING * 2 - 320
-                surface.blit(font(11).render(label,   True, C_TEXT),     (content.x + PADDING, y))
-                surface.blit(font(11).render(eta_str, True, C_TEXT_DIM), (content.x + PADDING + 250, y))
-                bx = content.x + PADDING + 340
-                pygame.draw.rect(surface, C_BTN, pygame.Rect(bx, y + 4, bar_w, ROW_H - 6), border_radius=3)
-                fw = int(bar_w * o.fraction)
-                if fw:
-                    pygame.draw.rect(surface, _C_DISPATCH, pygame.Rect(bx, y + 4, fw, ROW_H - 6), border_radius=3)
-                y += ROW_H + 2
-        else:
-            surface.blit(font(11).render("No drop ships in transit.", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H
-
-        y += 6; draw_separator(surface, content.x + PADDING, y, content.right - PADDING); y += 8
-
-        here = self._count_here("ship", "drop_ship")
-        surface.blit(font(12, bold=True).render("Deploy Drop Ship", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-
-        if here < 1:
-            surface.blit(font(11).render("No drop ships available at this location.", True, C_WARN), (content.x + PADDING + 8, y))
-            return
-
-        d = self._deploy
-        from ..game_state import DiscoveryState
-
-        if d.step == 0:
-            surface.blit(font(11).render("Select a destination system:", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H + 4
-            if gs and gs.galaxy:
-                for sys in gs.galaxy.solar_systems:
-                    if y + ROW_H > content.bottom - PADDING:
-                        break
-                    state = gs.get_state(sys.id)
-                    if state not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
-                        continue
-                    dist  = system_distance(gs.galaxy, self.system_id or "", sys.id)
-                    speed = SHIP_SPEEDS["drop_ship"]
-                    label = f"◉  {sys.name}  ({dist:.0f} ly  ·  {dist/speed:.1f} yr)"
-                    btn_r = pygame.Rect(content.x + PADDING + 8, y, content.width - PADDING * 2 - 16, ROW_H)
-                    if btn_r.collidepoint(pygame.mouse.get_pos()):
-                        pygame.draw.rect(surface, C_HOVER, btn_r, border_radius=2)
-                    surface.blit(font(11).render(label, True, C_TEXT), (btn_r.x + 4, y + 2))
-                    self._dispatch_btns.append((btn_r, sys.id))
-                    y += ROW_H + 1
-
-        elif d.step == 2:
-            # Pick body
-            surface.blit(
-                font(11).render(f"System: {d.sys_name}  — select a body:", True, C_TEXT_DIM),
-                (content.x + PADDING + 8, y),
-            )
-            y += ROW_H + 4
-            if gs and gs.galaxy:
-                sys = next((s for s in gs.galaxy.solar_systems if s.id == d.sys_id), None)
-                if sys:
-                    for body in sys.orbital_bodies:
-                        if y + ROW_H > content.bottom - PADDING * 4:
-                            break
-                        label = f"◉  {body.name}  ({body.subtype or body.body_type.value})"
-                        btn_r = pygame.Rect(content.x + PADDING + 8, y, content.width - PADDING * 2 - 16, ROW_H)
-                        if btn_r.collidepoint(pygame.mouse.get_pos()):
-                            pygame.draw.rect(surface, C_HOVER, btn_r, border_radius=2)
-                        surface.blit(font(11).render(label, True, C_TEXT), (btn_r.x + 4, y + 2))
-                        self._body_btns.append((btn_r, body.id, body.name))
-                        y += ROW_H + 1
-
-            can_r = pygame.Rect(content.x + PADDING, content.bottom - 32, 90, 24)
-            pygame.draw.rect(surface, C_BTN_HOV, can_r, border_radius=4)
-            surface.blit(font(11).render("Cancel", True, C_BTN_TXT), (can_r.x + 8, can_r.y + 4))
-            self._cancel_btn = can_r
-
-        elif d.step == 3:
-            # Confirm
-            surface.blit(
-                font(11).render(f"Deploy to:  {d.body_name}  in  {d.sys_name}", True, C_TEXT),
-                (content.x + PADDING + 8, y),
-            )
-            y += ROW_H + 4
-            surface.blit(
-                font(10).render(
-                    "On arrival the drop ship will be destroyed and deploy 1 Constructor + 1 Miner bot.",
-                    True, C_TEXT_DIM,
-                ),
-                (content.x + PADDING + 8, y),
-            )
-            y += ROW_H + 12
-
-            conf_r = pygame.Rect(content.x + PADDING + 8, y, 110, 26)
-            can_r  = pygame.Rect(content.x + PADDING + 130, y, 90, 26)
-            pygame.draw.rect(surface, _C_DISPATCH, conf_r, border_radius=4)
-            pygame.draw.rect(surface, C_BTN_HOV,  can_r,  border_radius=4)
-            surface.blit(font(11).render("Confirm", True, C_BTN_TXT), (conf_r.x + 8, conf_r.y + 5))
-            surface.blit(font(11).render("Cancel",  True, C_BTN_TXT), (can_r.x  + 8, can_r.y  + 5))
-            self._confirm_btn = conf_r
-            self._cancel_btn  = can_r
-
-    # -- Mining Vessel --
-
-    def _draw_mining_vessel(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        self._dispatch_btns = []
-        self._body_btns     = []
-        self._confirm_btn   = None
-        self._cancel_btn    = None
-        gs = self.app.game_state
-
-        surface.blit(font(12, bold=True).render("Mining Vessels In Transit", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-        orders = [o for o in (gs.order_queue.active() if gs else []) if o.ship_type == "mining_vessel"]
-        if orders:
-            for o in orders:
-                label   = f"→ {self._sys_name(o.target_system_id)}"
-                eta_str = f"ETA {o.eta_years:.1f} yr"
-                bar_w   = content.width - PADDING * 2 - 280
-                surface.blit(font(11).render(label,   True, C_TEXT),     (content.x + PADDING, y))
-                surface.blit(font(11).render(eta_str, True, C_TEXT_DIM), (content.x + PADDING + 180, y))
-                bx = content.x + PADDING + 270
-                pygame.draw.rect(surface, C_BTN, pygame.Rect(bx, y + 4, bar_w, ROW_H - 6), border_radius=3)
-                fw = int(bar_w * o.fraction)
-                if fw:
-                    pygame.draw.rect(surface, C_SELECTED, pygame.Rect(bx, y + 4, fw, ROW_H - 6), border_radius=3)
-                y += ROW_H + 2
-        else:
-            surface.blit(font(11).render("No mining vessels in transit.", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H
-
-        y += 6; draw_separator(surface, content.x + PADDING, y, content.right - PADDING); y += 8
-
-        here = self._count_here("ship", "mining_vessel")
-        surface.blit(font(12, bold=True).render("Dispatch Mining Vessel", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 2
-
-        if here < 1:
-            surface.blit(font(11).render("No mining vessels available here.", True, C_WARN), (content.x + PADDING + 8, y))
-            return
-
-        d = self._deploy
-        if d.step == 0:
-            surface.blit(font(11).render("Select destination system:", True, C_TEXT_DIM), (content.x + PADDING + 8, y))
-            y += ROW_H + 4
-            from ..game_state import DiscoveryState
-            if gs and gs.galaxy:
-                for sys in gs.galaxy.solar_systems:
-                    if y + ROW_H > content.bottom - PADDING:
-                        break
-                    state = gs.get_state(sys.id)
-                    if state not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
-                        continue
-                    dist  = system_distance(gs.galaxy, self.system_id or "", sys.id)
-                    speed = SHIP_SPEEDS["mining_vessel"]
-                    label = f"◉  {sys.name}  ({dist:.0f} ly  ·  {dist/speed:.1f} yr)"
-                    btn_r = pygame.Rect(content.x + PADDING + 8, y, content.width - PADDING * 2 - 16, ROW_H)
-                    if btn_r.collidepoint(pygame.mouse.get_pos()):
-                        pygame.draw.rect(surface, C_HOVER, btn_r, border_radius=2)
-                    surface.blit(font(11).render(label, True, C_TEXT), (btn_r.x + 4, y + 2))
-                    self._dispatch_btns.append((btn_r, sys.id))
-                    y += ROW_H + 1
-
-        elif d.step == 3:
-            surface.blit(
-                font(11).render(f"Dispatch to:  {d.sys_name}", True, C_TEXT),
-                (content.x + PADDING + 8, y),
-            )
-            y += ROW_H + 12
-            conf_r = pygame.Rect(content.x + PADDING + 8, y, 110, 26)
-            can_r  = pygame.Rect(content.x + PADDING + 130, y, 90, 26)
-            pygame.draw.rect(surface, _C_DISPATCH, conf_r, border_radius=4)
-            pygame.draw.rect(surface, C_BTN_HOV,  can_r,  border_radius=4)
-            surface.blit(font(11).render("Confirm", True, C_BTN_TXT), (conf_r.x + 8, conf_r.y + 5))
-            surface.blit(font(11).render("Cancel",  True, C_BTN_TXT), (can_r.x  + 8, can_r.y  + 5))
-            self._confirm_btn = conf_r
-            self._cancel_btn  = can_r
-
-    # -- Generic ship --
-
-    def _draw_ship_generic(self, surface: pygame.Surface, content: pygame.Rect, y: int) -> None:
-        surface.blit(font(12, bold=True).render("Available Tasks", True, C_ACCENT), (content.x + PADDING, y))
-        y += ROW_H + 4
-        tasks = _SHIP_TASKS.get(self.type_value or "", [])
-        for task in tasks:
-            surface.blit(font(11).render(f"▷  {task}", True, C_TEXT), (content.x + PADDING, y))
-            y += ROW_H
-        if not tasks:
-            surface.blit(font(11).render("No tasks defined.", True, C_TEXT_DIM), (content.x + PADDING, y))
-            y += ROW_H
-        y += 12
-        surface.blit(font(11).render("Task queue: not yet implemented.", True, C_TEXT_DIM), (content.x + PADDING, y))
-
-    # ------------------------------------------------------------------
-    # Helpers
-
-    def _count_here(self, category: str, type_value: str) -> int:
+    def _draw_bot(self, surface: pygame.Surface, cx: int, cy: int) -> int:
         gs = self.app.game_state
         if not gs:
-            return 0
-        loc = self.body_id or self.system_id
-        if not loc:
-            return 0
-        return sum(
-            i.count for i in gs.entity_roster.at(loc)
-            if i.category == category and i.type_value == type_value
-        )
+            return cy
 
-    def _sys_name(self, sys_id: str) -> str:
-        if self.app.galaxy:
-            s = next((x for x in self.app.galaxy.solar_systems if x.id == sys_id), None)
-            if s:
-                return s.name
-        return sys_id
+        loc = self._body_id or self._system_id or ""
+        tasks = gs.bot_tasks.get(loc, self._type_value)
+        total_alloc = gs.bot_tasks.total_allocation(loc, self._type_value)
+
+        # Total allocation bar
+        bar_w = self._rect.width - PADDING * 4
+        bar_r = pygame.Rect(cx, cy, bar_w, 12)
+        pygame.draw.rect(surface, (30, 50, 80), bar_r, border_radius=3)
+        fill_w = int(bar_w * total_alloc / 100)
+        col = (80, 200, 100) if total_alloc <= 100 else (255, 80, 80)
+        if fill_w > 0:
+            pygame.draw.rect(surface, col, pygame.Rect(cx, cy, fill_w, 12), border_radius=3)
+        alloc_lbl = font(11).render(f"Allocation: {total_alloc}%", True, C_TEXT_DIM)
+        surface.blit(alloc_lbl, (cx, cy - 14))
+        cy += 20
+
+        # Task rows
+        if tasks:
+            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+            th = font(11, bold=True).render("TASKS", True, C_ACCENT)
+            surface.blit(th, (cx, cy + 3))
+            cy += 18
+
+            for task in tasks:
+                if cy + 42 > self._rect.bottom - 80:
+                    break
+                task_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 40)
+                pygame.draw.rect(surface, (18, 30, 60), task_r, border_radius=3)
+                pygame.draw.rect(surface, C_BORDER, task_r, width=1, border_radius=3)
+
+                # Task description
+                if task.task_type == "mine":
+                    desc = f"MINE  {task.resource or '?'}"
+                    progress_frac = min(1.0, task.progress / max(1, task.target_amount))
+                    prog_str = f"{task.progress:,.0f} / {task.target_amount:,.0f}"
+                else:
+                    desc = f"BUILD  {(task.entity_type or '?').replace('_', ' ').title()}"
+                    progress_frac = min(1.0, task.built_count / max(1, task.target_amount))
+                    prog_str = f"{task.built_count} / {task.target_amount}"
+
+                desc_s = font(12, bold=True).render(desc.upper(), True, C_TEXT)
+                prog_s = font(11).render(prog_str, True, C_TEXT_DIM)
+                surface.blit(desc_s, (cx + 6, cy + 4))
+                surface.blit(prog_s, (cx + 6, cy + 22))
+
+                # Progress bar
+                pbar_x = cx + 6
+                pbar_y = cy + 34
+                pbar_w = 200
+                pygame.draw.rect(surface, (30, 50, 80),
+                                 pygame.Rect(pbar_x, pbar_y, pbar_w, 5))
+                if progress_frac > 0:
+                    pygame.draw.rect(surface, C_ACCENT,
+                                     pygame.Rect(pbar_x, pbar_y, int(pbar_w * progress_frac), 5))
+
+                # Allocation controls
+                alloc_x = task_r.right - 120
+                alloc_s = font(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                surface.blit(alloc_s, (alloc_x + 24, cy + 10))
+
+                dec_r = pygame.Rect(alloc_x, cy + 8, 22, 22)
+                inc_r = pygame.Rect(alloc_x + 56, cy + 8, 22, 22)
+                pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
+                pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
+                surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT),
+                             (dec_r.x + 5, dec_r.y + 2))
+                surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT),
+                             (inc_r.x + 5, inc_r.y + 2))
+                self._hit_rects.append((dec_r, "alloc_dec", (task.task_id, task)))
+                self._hit_rects.append((inc_r, "alloc_inc", (task.task_id, task)))
+
+                # Remove button
+                rm_r = pygame.Rect(task_r.right - 26, cy + 8, 22, 22)
+                pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
+                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)),
+                             (rm_r.x + 4, rm_r.y + 2))
+                self._hit_rects.append((rm_r, "remove_task", task.task_id))
+
+                cy += 46
+        else:
+            no_tasks = font(12).render("No tasks assigned.", True, C_TEXT_DIM)
+            surface.blit(no_tasks, (cx, cy + 8))
+            cy += ROW_H + 8
+
+        # + Add task button
+        add_btn_r = pygame.Rect(cx, cy + 4, 130, 26)
+        pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN,
+                         add_btn_r, border_radius=4)
+        add_lbl = font(12, bold=True).render(
+            "▼  ADD TASK" if not self._add_task_mode else "▲  CANCEL",
+            True, C_BTN_TXT
+        )
+        surface.blit(add_lbl, add_lbl.get_rect(center=add_btn_r.center))
+        self._hit_rects.append((add_btn_r, "toggle_add_task", None))
+        cy += 36
+
+        if self._add_task_mode:
+            cy = self._draw_add_task_form(surface, cx, cy)
+
+        return cy
+
+    def _draw_add_task_form(self, surface: pygame.Surface, cx: int, cy: int) -> int:
+        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 165)
+        pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
+        pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
+
+        fx = cx + 8
+        fy = cy + 8
+
+        # Task type toggle
+        for i, (ttype, tlabel) in enumerate([("mine", "Mine"), ("build", "Build")]):
+            tr = pygame.Rect(fx + i * 80, fy, 72, 22)
+            sel = self._add_task_type == ttype
+            pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tr, border_radius=3)
+            surface.blit(font(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT),
+                         font(11, bold=True).render(tlabel, True, C_BTN_TXT).get_rect(center=tr.center))
+            self._hit_rects.append((tr, "set_task_type", ttype))
+        fy += 30
+
+        # Resource / entity type selector
+        if self._add_task_type == "mine":
+            for i, res in enumerate(_MINE_RESOURCES):
+                rr = pygame.Rect(fx + (i % 3) * 90, fy + (i // 3) * 26, 82, 22)
+                sel = self._add_task_res == res
+                pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, rr, border_radius=3)
+                rlbl = font(10, bold=True).render(_MINE_RES_LABELS[res], True,
+                                                  (0, 0, 0) if sel else C_BTN_TXT)
+                surface.blit(rlbl, rlbl.get_rect(center=rr.center))
+                self._hit_rects.append((rr, "set_res", res))
+            fy += 60
+        else:
+            # Simple entity types to build
+            buildables = ["extractor", "factory", "research_array", "miner", "constructor"]
+            for i, etype in enumerate(buildables):
+                er = pygame.Rect(fx + (i % 3) * 95, fy + (i // 3) * 26, 88, 22)
+                sel = self._add_task_res == etype
+                pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, er, border_radius=3)
+                elbl = font(10, bold=True).render(etype.replace("_", " ").title(), True,
+                                                  (0, 0, 0) if sel else C_BTN_TXT)
+                surface.blit(elbl, elbl.get_rect(center=er.center))
+                self._hit_rects.append((er, "set_res", etype))
+            fy += 60
+
+        # Amount row
+        dec_r = pygame.Rect(fx, fy, 26, 22)
+        inc_r = pygame.Rect(fx + 90, fy, 26, 22)
+        pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
+        pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
+        surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        amt_s = font(12, bold=True).render(str(self._add_task_amount), True, C_SELECTED)
+        surface.blit(amt_s, (fx + 34, fy + 3))
+        amt_lbl = font(11).render("target amount", True, C_TEXT_DIM)
+        surface.blit(amt_lbl, (fx + 120, fy + 4))
+        self._hit_rects.append((dec_r, "dec_amount", None))
+        self._hit_rects.append((inc_r, "inc_amount", None))
+        fy += 30
+
+        # Confirm button
+        conf_r = pygame.Rect(fx, fy, 100, 24)
+        pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
+        surface.blit(font(12, bold=True).render("CONFIRM", True, (200, 255, 220)),
+                     font(12, bold=True).render("CONFIRM", True, C_BTN_TXT).get_rect(center=conf_r.center))
+        self._hit_rects.append((conf_r, "confirm_add_task", None))
+
+        return cy + 175
+
+    # ------------------------------------------------------------------
+    # Ship panel
+
+    def _draw_ship(self, surface: pygame.Surface, cx: int, cy: int) -> int:
+        gs = self.app.game_state
+        if not gs:
+            return cy
+
+        loc = self._system_id or ""
+
+        def txt(label: str, value: str, vcol=C_TEXT) -> None:
+            nonlocal cy
+            l = font(12).render(label, True, C_TEXT_DIM)
+            v = font(12, bold=True).render(value, True, vcol)
+            surface.blit(l, (cx, cy))
+            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
+            cy += ROW_H
+
+        count = self._count_at_location()
+        txt("In system", str(count))
+
+        # Travel queue
+        orders = gs.order_queue.get_all(loc, self._type_value)
+        cy += 8
+        draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+        qlbl = font(11, bold=True).render("TRAVEL QUEUE", True, C_ACCENT)
+        surface.blit(qlbl, (cx, cy + 3))
+        cy += 18
+
+        if orders:
+            for order in orders[:5]:
+                dest_str = order.target_system_id or "?"
+                prog_str = f"{order.progress:.0%}"
+                galaxy = self.app.galaxy
+                if galaxy:
+                    sys_obj = next(
+                        (s for s in galaxy.solar_systems if s.id == dest_str), None
+                    )
+                    if sys_obj:
+                        dest_str = sys_obj.name
+                row_s = font(12).render(
+                    f"▶  {dest_str}  —  {prog_str} complete", True, C_TEXT
+                )
+                surface.blit(row_s, (cx + 6, cy))
+                pbar_w = min(200, self._rect.width - PADDING * 4)
+                pygame.draw.rect(surface, (30, 50, 80),
+                                 pygame.Rect(cx + 6, cy + 16, pbar_w, 4))
+                pygame.draw.rect(surface, C_ACCENT,
+                                 pygame.Rect(cx + 6, cy + 16, int(pbar_w * order.progress), 4))
+                cy += 26
+        else:
+            no_ord = font(12).render("No orders queued.", True, C_TEXT_DIM)
+            surface.blit(no_ord, (cx, cy))
+            cy += ROW_H
+
+        # Drop Ship / Probe dispatch
+        if self._type_value in ("drop_ship", "probe") and count > 0:
+            cy += 8
+            send_btn_r = pygame.Rect(cx, cy, 160, 28)
+            pygame.draw.rect(surface, C_BTN_HOV if self._send_mode else C_BTN,
+                             send_btn_r, border_radius=4)
+            send_lbl = font(12, bold=True).render(
+                "▼  SEND SHIP" if not self._send_mode else "▲  CANCEL SEND",
+                True, C_BTN_TXT,
+            )
+            surface.blit(send_lbl, send_lbl.get_rect(center=send_btn_r.center))
+            self._hit_rects.append((send_btn_r, "toggle_send", None))
+            cy += 36
+
+            if self._send_mode:
+                self._sys_list.rect = pygame.Rect(
+                    cx, cy,
+                    self._rect.width - PADDING * 2,
+                    min(200, self._rect.bottom - cy - 50),
+                )
+                self._sys_list.draw(surface)
+                cy += self._sys_list.rect.height + 8
+
+                if self._send_system_id:
+                    disp_btn_r = pygame.Rect(cx, cy, 140, 28)
+                    pygame.draw.rect(surface, (0, 110, 180), disp_btn_r, border_radius=4)
+                    galaxy = self.app.galaxy
+                    dest_name = self._send_system_id
+                    if galaxy:
+                        sys_obj = next(
+                            (s for s in galaxy.solar_systems
+                             if s.id == self._send_system_id), None
+                        )
+                        if sys_obj:
+                            dest_name = sys_obj.name
+                    disp_lbl = font(12, bold=True).render(
+                        f"DISPATCH → {dest_name}", True, (200, 240, 255)
+                    )
+                    surface.blit(disp_lbl, disp_lbl.get_rect(center=disp_btn_r.center))
+                    self._hit_rects.append((disp_btn_r, "dispatch_ship", None))
+                    cy += 36
+
+        return cy
+
+    # ------------------------------------------------------------------
+    # Bio panel
+
+    def _draw_bio(self, surface: pygame.Surface, cx: int, cy: int) -> int:
+        gs = self.app.game_state
+        if not gs:
+            return cy
+        loc = self._body_id or ""
+        pop = gs.bio_state.get(loc) if loc else None
+        if not pop:
+            msg = font(12).render("No bio population here.", True, C_TEXT_DIM)
+            surface.blit(msg, (cx, cy))
+            return cy + ROW_H
+
+        def txt(label: str, value: str, vcol=C_TEXT) -> None:
+            nonlocal cy
+            l = font(12).render(label, True, C_TEXT_DIM)
+            v = font(12, bold=True).render(value, True, vcol)
+            surface.blit(l, (cx, cy))
+            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
+            cy += ROW_H
+
+        txt("Type",        pop.bio_type.value.capitalize())
+        txt("Population",  f"{pop.population:,.0f}",
+            (255, 80, 80) if pop.bio_type.value == "uplifted" else (80, 200, 100))
+        txt("Aggression",  f"{pop.aggression:.0%}",
+            C_WARN if pop.aggression > 0.65 else C_TEXT)
+        txt("Growth rate", f"{pop.growth_rate:.1%}/yr")
+        return cy

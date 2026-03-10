@@ -98,6 +98,13 @@ class MapPanel:
         if hit_id is None:
             return
 
+        # Orbital structure square click
+        if hit_id.endswith("_orbital_struct"):
+            system = self.app.selected_system
+            if system:
+                self.app.open_entity_view("structure", "extractor", system.id, None)
+            return
+
         now = time.time()
         double = (hit_id == self._last_click_id and now - self._last_click_time < 0.35)
         self._last_click_time = now
@@ -177,6 +184,14 @@ class MapPanel:
         # Scale: fit the 5 AU zone comfortably, compress outer orbits
         max_r_px = min(MAP_W, TOP_H) * 0.44
 
+        gs = self.app.game_state
+        is_probed = gs.is_probed(system.id) if gs else False
+
+        # Show probe-required overlay if unprobed
+        if not is_probed:
+            self._draw_probe_required(surface, system)
+            return
+
         # 1. Orbit rings (draw before bodies)
         for body in system.orbital_bodies:
             r_px = self._au_to_px(body.orbital_radius, max_r_px)
@@ -195,7 +210,25 @@ class MapPanel:
         if self.app.selected_body_id == star.id:
             pygame.draw.circle(surface, C_SELECTED, (cx, cy), star_r + 5, 2)
 
-        # 3. Orbital bodies
+        # 3. Orbital structure icon (square) near the star
+        if gs:
+            orbital_structs = [
+                i for i in gs.entity_roster.at(system.id)
+                if i.category == "structure"
+            ]
+            if orbital_structs:
+                struct_total = sum(i.count for i in orbital_structs)
+                sq_x = cx + star_r + 14
+                sq_y = cy - 8
+                sq_r = pygame.Rect(sq_x, sq_y, 16, 16)
+                pygame.draw.rect(surface, (0, 60, 100), sq_r)
+                pygame.draw.rect(surface, C_ACCENT, sq_r, width=1)
+                sq_lbl = font(9, bold=True).render(str(struct_total), True, C_ACCENT)
+                surface.blit(sq_lbl, sq_lbl.get_rect(center=sq_r.center))
+                self._hit_targets.append((system.id + "_orbital_struct",
+                                          sq_r.centerx, sq_r.centery, 12))
+
+        # 4. Orbital bodies
         for body in system.orbital_bodies:
             r_px   = self._au_to_px(body.orbital_radius, max_r_px)
             angle  = self._orbit_angle(body.id, body.orbital_radius, t)
@@ -213,8 +246,26 @@ class MapPanel:
             pygame.draw.circle(surface, col, (bx, by), max(2, vis_r))
             self._hit_targets.append((body.id, bx, by, max(vis_r + 3, 8)))
 
-        # 4. Labels for selected body
+        # 5. Labels for selected body
         self._draw_system_label(surface, system)
+
+    def _draw_probe_required(self, surface: pygame.Surface, system) -> None:
+        """Show a message when the system has not been probed yet."""
+        star     = system.star
+        star_col = STAR_COLORS.get(star.star_type.value, (255, 220, 80))
+        cx, cy   = self.rect.centerx, self.rect.centery
+
+        # Dim star silhouette
+        self._draw_glow(surface, cx, cy, 40, star_col, steps=4)
+        pygame.draw.circle(surface, tuple(c // 3 for c in star_col), (cx, cy), 14)
+
+        msg1 = font(15, bold=True).render("SYSTEM UNPROBED", True, C_ACCENT)
+        msg2 = font(12).render(
+            "Send a Probe or Drop Ship here to reveal body details.",
+            True, C_TEXT_DIM,
+        )
+        surface.blit(msg1, msg1.get_rect(center=(cx, cy + 50)))
+        surface.blit(msg2, msg2.get_rect(center=(cx, cy + 72)))
 
     def _draw_system_label(self, surface: pygame.Surface, system) -> None:
         """System name + star type in top-right corner of map panel."""

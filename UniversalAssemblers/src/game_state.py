@@ -161,6 +161,31 @@ class EntityRoster:
     def all(self) -> list[EntityInstance]:
         return list(self._instances)
 
+    def to_dict(self) -> dict:
+        return {
+            "instances": [
+                {
+                    "category":    i.category,
+                    "type_value":  i.type_value,
+                    "location_id": i.location_id,
+                    "count":       i.count,
+                }
+                for i in self._instances
+            ]
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "EntityRoster":
+        er = cls()
+        for inst in d.get("instances", []):
+            er.add(
+                inst["category"],
+                inst["type_value"],
+                inst["location_id"],
+                inst.get("count", 1),
+            )
+        return er
+
 
 # ---------------------------------------------------------------------------
 # Tech state
@@ -220,6 +245,19 @@ class TechState:
     def in_progress_ids(self) -> list[str]:
         return list(self._progress.keys())
 
+    def to_dict(self) -> dict:
+        return {
+            "researched": list(self.researched),
+            "progress":   dict(self._progress),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TechState":
+        ts = cls()
+        ts.researched = set(d.get("researched", []))
+        ts._progress  = dict(d.get("progress", {}))
+        return ts
+
 
 # ---------------------------------------------------------------------------
 # GameState
@@ -240,6 +278,7 @@ class GameState:
         self.order_queue: OrderQueue = OrderQueue()
         self.sim_engine: SimulationEngine = SimulationEngine(self)
         self._sim_events: list = []   # most-recent tick's events, for UI polling
+        self.probed_systems: set[str] = set()   # systems a probe has visited
 
     # ------------------------------------------------------------------
     # Factory
@@ -269,6 +308,9 @@ class GameState:
         for cat, type_val, loc_token, count in STARTING_ENTITIES:
             loc_id = home_system_id if loc_token == "home_system" else home_body_id
             gs.entity_roster.add(cat, type_val, loc_id, count)
+
+        # Home system starts probed (player has full visibility there)
+        gs.probed_systems = {home.id}
 
         # Bio populations — seed from bios resource values on all bodies
         gs._init_bio_state()
@@ -358,3 +400,38 @@ class GameState:
             1 for s in self._states.values()
             if s in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
         )
+
+    def is_probed(self, system_id: str) -> bool:
+        return system_id in self.probed_systems
+
+    # ------------------------------------------------------------------
+    # Serialisation
+
+    def to_dict(self) -> dict:
+        return {
+            "version": 1,
+            "discovery_states": {k: v.value for k, v in self._states.items()},
+            "probed_systems":   list(self.probed_systems),
+            "entity_roster":    self.entity_roster.to_dict(),
+            "tech":             self.tech.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, galaxy: "Galaxy") -> "GameState":
+        gs = cls()
+        gs.galaxy    = galaxy
+        gs.adjacency = cls._build_adjacency(galaxy, k=3)
+
+        for sys_id, state_val in d.get("discovery_states", {}).items():
+            gs._states[sys_id] = DiscoveryState(state_val)
+
+        gs.probed_systems  = set(d.get("probed_systems", []))
+        gs.entity_roster   = EntityRoster.from_dict(d.get("entity_roster", {}))
+        gs.tech            = TechState.from_dict(d.get("tech", {}))
+
+        gs._init_bio_state()
+
+        from .simulation import SimulationEngine
+        gs.sim_engine = SimulationEngine(gs)
+
+        return gs
