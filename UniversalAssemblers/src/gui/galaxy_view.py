@@ -128,6 +128,17 @@ class GalaxyView:
         fog.fill((*_FOG_COLOR, _FOG_BASE_ALPHA))
 
         for sys in self.app.galaxy.solar_systems:
+            if sys.warp_only:
+                # Warp-only systems: small reduced fog clearance (always dim-visible)
+                pos = self._screen_pos.get(sys.id)
+                if not pos:
+                    continue
+                max_r = 30
+                for r in range(max_r, 0, -3):
+                    alpha = int(_FOG_BASE_ALPHA * (r / max_r) ** 2.0)
+                    pygame.draw.circle(fog, (*_FOG_COLOR, alpha), pos, r)
+                continue
+
             state = gs.get_state(sys.id)
             pos   = self._screen_pos.get(sys.id)
             if not pos:
@@ -177,6 +188,13 @@ class GalaxyView:
         if hit_id is None:
             return
 
+        # Warp-only systems are visible but not clickable
+        galaxy = self.app.galaxy
+        if galaxy:
+            hit_sys = next((s for s in galaxy.solar_systems if s.id == hit_id), None)
+            if hit_sys and hit_sys.warp_only:
+                return
+
         gs = self.app.game_state
         state = gs.get_state(hit_id)
 
@@ -201,9 +219,11 @@ class GalaxyView:
         best_dist = _CLICK_RADIUS + 1
         gs = self.app.game_state
         for sys in self.app.galaxy.solar_systems:
-            state = gs.get_state(sys.id)
-            if state == DiscoveryState.UNKNOWN:
-                continue
+            # Warp-only systems are always visible (dim) but clickable for tooltip info
+            if not sys.warp_only:
+                state = gs.get_state(sys.id)
+                if state == DiscoveryState.UNKNOWN:
+                    continue
             sp = self._screen_pos.get(sys.id)
             if sp is None:
                 continue
@@ -313,13 +333,29 @@ class GalaxyView:
         tick    = pygame.time.get_ticks()
         pulse   = int(128 + 80 * math.sin(tick / 400.0))   # 0–255 pulsing
 
-        for sys in self.app.galaxy.solar_systems:
-            state = gs.get_state(sys.id)
-            if state == DiscoveryState.UNKNOWN:
-                continue
+        _WARP_COLOR = (80, 40, 120)   # dim purple for warp-only systems
 
+        for sys in self.app.galaxy.solar_systems:
             sp = self._screen_pos.get(sys.id)
             if sp is None:
+                continue
+
+            # Warp-only systems: dim square icon, always visible
+            if sys.warp_only:
+                sq_size = 8
+                sq_rect = pygame.Rect(sp[0] - sq_size // 2, sp[1] - sq_size // 2, sq_size, sq_size)
+                warp_surf = pygame.Surface((sq_size + 2, sq_size + 2), pygame.SRCALPHA)
+                pygame.draw.rect(warp_surf, (*_WARP_COLOR, 180), warp_surf.get_rect())
+                surface.blit(warp_surf, (sq_rect.x - 1, sq_rect.y - 1))
+                pygame.draw.rect(surface, (100, 60, 160), sq_rect, 1)
+                name_lbl = font(10).render(sys.name, True, (80, 50, 110))
+                surface.blit(name_lbl, (sp[0] - name_lbl.get_width() // 2, sp[1] + 12))
+                warp_lbl = font(9).render("WARP ONLY", True, (80, 40, 120))
+                surface.blit(warp_lbl, (sp[0] - warp_lbl.get_width() // 2, sp[1] + 22))
+                continue
+
+            state = gs.get_state(sys.id)
+            if state == DiscoveryState.UNKNOWN:
                 continue
 
             star_color = STAR_COLORS.get(sys.star.star_type.value, (200, 200, 200))

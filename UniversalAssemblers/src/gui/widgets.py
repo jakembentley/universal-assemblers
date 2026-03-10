@@ -177,3 +177,64 @@ class ScrollableList:
 
 def draw_separator(surface: pygame.Surface, x1: int, y: int, x2: int) -> None:
     pygame.draw.line(surface, C_SEP, (x1, y), (x2, y))
+
+
+# ---------------------------------------------------------------------------
+# TextInput
+# ---------------------------------------------------------------------------
+
+class TextInput:
+    """Single-line text input box. Call handle_event() with ALL events while active."""
+    def __init__(self, rect, initial_text="", font_size=13, max_length=60):
+        self.rect = pygame.Rect(rect)
+        self.text = initial_text
+        self.active = False
+        self._cursor = len(initial_text)
+        self._font_size = font_size
+        self.max_length = max_length
+        self._blink_t = 0
+
+    def handle_event(self, event):
+        if not self.active:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self.active = self.rect.collidepoint(event.pos)
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.active = self.rect.collidepoint(event.pos)
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+                if self._cursor > 0:
+                    self.text = self.text[:self._cursor-1] + self.text[self._cursor:]
+                    self._cursor -= 1
+            elif event.key == pygame.K_DELETE:
+                self.text = self.text[:self._cursor] + self.text[self._cursor+1:]
+            elif event.key == pygame.K_LEFT:
+                self._cursor = max(0, self._cursor - 1)
+            elif event.key == pygame.K_RIGHT:
+                self._cursor = min(len(self.text), self._cursor + 1)
+            elif event.key == pygame.K_HOME:
+                self._cursor = 0
+            elif event.key == pygame.K_END:
+                self._cursor = len(self.text)
+            elif event.unicode and event.unicode.isprintable() and len(self.text) < self.max_length:
+                self.text = self.text[:self._cursor] + event.unicode + self.text[self._cursor:]
+                self._cursor += 1
+
+    def draw(self, surface):
+        from .constants import C_ACCENT, C_TEXT, C_BTN, C_BORDER
+        bg = (18, 35, 75) if self.active else (13, 13, 32)
+        pygame.draw.rect(surface, bg, self.rect, border_radius=3)
+        border_col = C_ACCENT if self.active else C_BORDER
+        pygame.draw.rect(surface, border_col, self.rect, 1, border_radius=3)
+        f = font(self._font_size)
+        text_surf = f.render(self.text, True, C_TEXT)
+        clip_rect = self.rect.inflate(-6, -4)
+        surface.set_clip(clip_rect)
+        surface.blit(text_surf, (self.rect.x + 4, self.rect.centery - text_surf.get_height()//2))
+        if self.active:
+            self._blink_t = (self._blink_t + 1) % 60
+            if self._blink_t < 30:
+                cx = self.rect.x + 4 + f.size(self.text[:self._cursor])[0]
+                cx = min(cx, self.rect.right - 6)
+                pygame.draw.line(surface, C_ACCENT, (cx, self.rect.y+3), (cx, self.rect.bottom-3), 1)
+        surface.set_clip(None)

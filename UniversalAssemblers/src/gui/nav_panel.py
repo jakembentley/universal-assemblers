@@ -19,7 +19,7 @@ from .constants import (
     C_SELECTED, C_HOVER, C_SEP, C_WARN, BODY_COLORS, STAR_COLORS,
     font,
 )
-from .widgets import ScrollableList, draw_panel, draw_separator
+from .widgets import ScrollableList, draw_panel, draw_separator, TextInput
 
 
 _SYS_H   = int(TOP_H * 0.28)
@@ -38,6 +38,11 @@ class NavPanel:
 
         self._sys_list  = ScrollableList(sys_rect,  "Solar Systems", on_select=self._on_system_select)
         self._body_list = ScrollableList(body_rect, "Celestial Bodies", on_select=self._on_body_select)
+
+        # Name-editing state
+        self._name_input: TextInput | None = None
+        self._editing_body: object | None = None
+        self._edit_icon_rect: pygame.Rect | None = None
 
         self._rebuild_systems()
         self._rebuild_bodies()
@@ -152,6 +157,58 @@ class NavPanel:
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
+            # If name input is active, route all events to it
+            if self._name_input is not None:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        # Commit the name change
+                        if self._editing_body is not None and self._name_input.text.strip():
+                            self._editing_body.name = self._name_input.text.strip()
+                        self._name_input = None
+                        self._editing_body = None
+                        continue
+                    elif event.key == pygame.K_ESCAPE:
+                        # Cancel
+                        self._name_input = None
+                        self._editing_body = None
+                        continue
+                self._name_input.handle_event(event)
+                continue
+
+            # Check for edit icon click
+            if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                    and self._edit_icon_rect is not None
+                    and self._edit_icon_rect.collidepoint(event.pos)):
+                # Start editing the currently selected body's name
+                body_id = self.app.selected_body_id
+                system  = self.app.selected_system
+                if body_id and system:
+                    edit_obj = None
+                    if body_id == system.star.id:
+                        edit_obj = system.star
+                    else:
+                        for ob in system.orbital_bodies:
+                            if ob.id == body_id:
+                                edit_obj = ob
+                                break
+                            for m in ob.moons:
+                                if m.id == body_id:
+                                    edit_obj = m
+                                    break
+                            if edit_obj:
+                                break
+                    if edit_obj is not None:
+                        input_rect = pygame.Rect(
+                            self._edit_icon_rect.x - 160,
+                            self._edit_icon_rect.y - 2,
+                            160,
+                            22,
+                        )
+                        self._name_input = TextInput(input_rect, edit_obj.name, font_size=12)
+                        self._name_input.active = True
+                        self._editing_body = edit_obj
+                continue
+
             self._sys_list.handle_event(event)
             self._body_list.handle_event(event)
 
@@ -164,6 +221,9 @@ class NavPanel:
         self._sys_list.draw(surface)
         self._body_list.draw(surface)
         self._draw_stats(surface)
+        # Draw active name input if present
+        if self._name_input is not None:
+            self._name_input.draw(surface)
 
     def _draw_stats(self, surface: pygame.Surface) -> None:
         rect = self.stat_rect
@@ -205,7 +265,13 @@ class NavPanel:
             star = system.star
             sc   = STAR_COLORS.get(star.star_type.value, (255, 220, 80))
             name = font(13, bold=True).render(star.name, True, sc)
-            surface.blit(name, (x, y)); y += 20
+            surface.blit(name, (x, y))
+            # Edit icon
+            icon_x = x + name.get_width() + 6
+            icon_surf = font(12).render("✎", True, C_TEXT_DIM)
+            surface.blit(icon_surf, (icon_x, y))
+            self._edit_icon_rect = pygame.Rect(icon_x, y, icon_surf.get_width() + 4, icon_surf.get_height())
+            y += 20
             txt("Class",  star.star_type.value, value_col=sc)
             txt("Mass",   f"{star.mass:.3f} M☉")
             section("Resources")
@@ -229,7 +295,12 @@ class NavPanel:
             if moon:
                 mc   = BODY_COLORS["moon"]
                 name = font(13, bold=True).render(moon.name, True, mc)
-                surface.blit(name, (x, y)); y += 20
+                surface.blit(name, (x, y))
+                icon_x = x + name.get_width() + 6
+                icon_surf = font(12).render("✎", True, C_TEXT_DIM)
+                surface.blit(icon_surf, (icon_x, y))
+                self._edit_icon_rect = pygame.Rect(icon_x, y, icon_surf.get_width() + 4, icon_surf.get_height())
+                y += 20
                 txt("Type",   "Moon")
                 txt("Parent", body.name.replace(system.name + " ", ""), value_col=C_TEXT_DIM)
                 txt("Size",   f"{moon.size:.3f} R⊕")
@@ -260,7 +331,12 @@ class NavPanel:
                 bc     = BODY_COLORS.get(subtype, BODY_COLORS.get(btype, C_TEXT))
                 short  = body.name.replace(system.name + " ", "")
                 name   = font(13, bold=True).render(body.name, True, bc)
-                surface.blit(name, (x, y)); y += 20
+                surface.blit(name, (x, y))
+                icon_x = x + name.get_width() + 6
+                icon_surf = font(12).render("✎", True, C_TEXT_DIM)
+                surface.blit(icon_surf, (icon_x, y))
+                self._edit_icon_rect = pygame.Rect(icon_x, y, icon_surf.get_width() + 4, icon_surf.get_height())
+                y += 20
                 txt("Type",   btype.capitalize())
                 if body.subtype:
                     txt("Class", body.subtype.replace("_", " ").title(), value_col=bc)

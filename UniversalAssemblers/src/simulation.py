@@ -71,9 +71,11 @@ def make_bio_population(
     system_id: str,
     bios_resource: float,
     rng: random.Random,
+    uplift_multiplier: float = 1.0,
 ) -> BioPopulation:
     """Seed a bio population from a body's bios resource value."""
-    bio_type    = BioType.UPLIFTED if rng.random() < 0.15 else BioType.PRIMITIVE
+    uplift_chance = min(0.15 * uplift_multiplier, 1.0)
+    bio_type    = BioType.UPLIFTED if rng.random() < uplift_chance else BioType.PRIMITIVE
     aggression  = rng.uniform(0.05, 0.95)
     growth_rate = rng.uniform(0.005, 0.08)
     population  = bios_resource * rng.uniform(50, 200)

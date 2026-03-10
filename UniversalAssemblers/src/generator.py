@@ -11,6 +11,7 @@ initialised with the seed), so the same seed always produces the same map.
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 from datetime import datetime, timezone
@@ -33,24 +34,53 @@ from .models.resource import Resource
 # Name-generation vocabulary
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PREFIXES = [
-    "Aegis", "Altair", "Antares", "Aquila", "Arcturus", "Auriga",
-    "Carina", "Cassini", "Centauri", "Corvus", "Cygnus", "Dorado",
-    "Draco", "Eridani", "Fornax", "Gemini", "Hydra", "Kepler",
-    "Lacerta", "Lyra", "Meridian", "Naos", "Norma", "Ophiuchi",
-    "Orion", "Perseus", "Phecda", "Proxima", "Puppis", "Rigel",
-    "Serpens", "Sirius", "Tau", "Tucana", "Vega", "Volans", "Vulpecula",
+# Style A: Classic — "{Greek_letter} {Constellation}"
+_GREEK = [
+    "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+    "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Pi", "Rho", "Sigma",
+    "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega",
+]
+_CONSTELLATION = [
+    "Andromeda", "Aquila", "Ara", "Auriga", "Bootes", "Cancer", "Canis",
+    "Carina", "Cassiopeia", "Centauri", "Cepheus", "Corvus", "Cygni",
+    "Dorado", "Draconis", "Eridani", "Geminorum", "Herculis", "Hydrae",
+    "Leonis", "Lyrae", "Normae", "Ophiuchi", "Orionis", "Pegasi", "Persei",
+    "Phoenicis", "Puppis", "Sagittarii", "Scorpii", "Serpentis", "Tauri",
+    "Tucanae", "Ursae", "Velorum", "Virginis", "Volantis",
 ]
 
-_SYSTEM_SUFFIXES = [
-    "Alpha", "Beta", "Delta", "Epsilon", "Gamma", "Major", "Minor",
-    "Nova", "Omega", "Prime", "Rex", "Sigma", "Theta", "Ultra", "Zeta",
+# Style B: Catalog — "{Prefix} {number}"
+_CATALOG_PREFIXES = [
+    "GJ", "HD", "HIP", "KIC", "LHS", "WISE", "Wolf", "Ross", "Lalande", "Gliese",
+]
+
+# Style C: Exotic — "{ExoticWord}{optional_suffix}"
+_EXOTIC_NAMES = [
+    "Aethos", "Borvath", "Caelum", "Dravex", "Elara", "Feraxis", "Galadris",
+    "Halveth", "Iketh", "Jorath", "Kethara", "Lacros", "Maedon", "Naevos",
+    "Orveth", "Praxi", "Quellar", "Ranoth", "Solvar", "Thalos", "Urrath",
+    "Vethis", "Wyrath", "Xanthos", "Zorvan", "Astherion", "Belcara", "Cruxis",
+    "Delvara", "Ethren", "Falmis", "Golveth", "Harkon", "Ithrel", "Jethara",
+    "Kelvos", "Loreth",
+]
+_EXOTIC_SUFFIXES = [
+    "", "Prime", "Reach", "Deep", "Station", "Nexus", "Expanse", "Rift",
+    "Gate", "Verge", "Edge", "Mark",
 ]
 
 _ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
           "XI", "XII", "XIII", "XIV", "XV"]
 
-_MOON_LABELS = list("abcdefghijklmnopqrstuvwxyz")
+# Moon name pool
+_MOON_POOL = [
+    "Io", "Europa", "Ganymede", "Callisto", "Amalthea", "Phobos", "Deimos",
+    "Triton", "Nereid", "Proteus", "Titan", "Rhea", "Dione", "Tethys",
+    "Enceladus", "Mimas", "Hyperion", "Ariel", "Umbriel", "Titania", "Oberon",
+    "Miranda", "Charon", "Nix", "Hydra", "Kerberos", "Aether", "Nemesis",
+    "Shade", "Echo", "Veil", "Drift", "Frost", "Shard", "Wraith", "Cinder",
+    "Hollow", "Pale", "Ruin", "Trace", "Flux", "Knell", "Mote", "Sable",
+    "Thorn", "Umber", "Vast", "Wane", "Yore", "Zephyr",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +120,21 @@ _STAR_LUMINOSITY_BASE = {
     StarType.M_TYPE: 5e23,
 }
 
+# Resource density multipliers
+_RES_MULT = {
+    "low":    0.4,
+    "normal": 1.0,
+    "high":   1.6,
+    "rich":   2.5,
+}
+
+# Bio uplift multipliers
+_BIO_MULT = {
+    "rare":   0.3,
+    "normal": 1.0,
+    "common": 2.5,
+}
+
 
 # ---------------------------------------------------------------------------
 # MapGenerator
@@ -113,6 +158,14 @@ class MapGenerator:
         Display name for the sector / galaxy.
     galaxy_radius_ly : float
         Half-width of the square region used for system placement (light-years).
+    resource_density : str
+        "low" | "normal" | "high" | "rich" — scales all resource amounts.
+    bio_uplift_rate : str
+        "rare" | "normal" | "common" — scales bios chance and uplift probability.
+    body_distribution : str
+        "balanced" | "rocky" | "gas_heavy" | "ice_rich" — skews body type weights.
+    warp_clusters : int
+        Number of isolated warp-only mini-clusters to add.
     """
 
     def __init__(
@@ -124,6 +177,10 @@ class MapGenerator:
         max_moons_per_planet: int = 8,
         galaxy_name: str = "Unnamed Sector",
         galaxy_radius_ly: float = 500.0,
+        resource_density: str = "normal",
+        bio_uplift_rate: str = "normal",
+        body_distribution: str = "balanced",
+        warp_clusters: int = 1,
     ) -> None:
         self.seed = seed if seed is not None else random.randint(0, 2**32 - 1)
         self.rng = random.Random(self.seed)
@@ -134,9 +191,21 @@ class MapGenerator:
         self.max_moons = max_moons_per_planet
         self.galaxy_name = galaxy_name
         self.galaxy_radius = galaxy_radius_ly
+        self.resource_density = resource_density
+        self.bio_uplift_rate = bio_uplift_rate
+        self.body_distribution = body_distribution
+        self.warp_clusters = warp_clusters
 
-        # Internal planet counter per system — reset for each system
+        self._res_mult = _RES_MULT.get(resource_density, 1.0)
+        self._bio_mult = _BIO_MULT.get(bio_uplift_rate, 1.0)
+
+        # Internal planet/moon state — reset per system/body
         self._planet_ordinal: int = 0
+        self._moon_names_used: set = set()
+        self._system_style: str = "classic"  # track current system name style
+
+        # Track used system names for uniqueness
+        self._used_system_names: set = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -144,10 +213,24 @@ class MapGenerator:
 
     def generate(self) -> Galaxy:
         """Generate and return a complete Galaxy object."""
-        systems = [
+        # Main cluster systems
+        main_systems = [
             self._generate_solar_system(i)
             for i in range(self.num_solar_systems)
         ]
+
+        # Warp-only mini-clusters
+        warp_systems: List[SolarSystem] = []
+        for cluster_idx in range(self.warp_clusters):
+            cluster_size = self.rng.randint(2, 4)
+            cluster_systems = self._generate_warp_cluster(
+                len(main_systems) + len(warp_systems),
+                cluster_size,
+            )
+            warp_systems.extend(cluster_systems)
+
+        all_systems = main_systems + warp_systems
+
         return Galaxy(
             seed=self.seed,
             name=self.galaxy_name,
@@ -158,8 +241,13 @@ class MapGenerator:
                 "max_bodies_per_system": self.max_bodies,
                 "max_moons_per_planet": self.max_moons,
                 "galaxy_radius_ly": self.galaxy_radius,
+                "resource_density": self.resource_density,
+                "bio_uplift_rate": self.bio_uplift_rate,
+                "body_distribution": self.body_distribution,
+                "warp_clusters": self.warp_clusters,
+                "bio_uplift_mult": self._bio_mult,
             },
-            solar_systems=systems,
+            solar_systems=all_systems,
         )
 
     @staticmethod
@@ -173,13 +261,84 @@ class MapGenerator:
         return output_path
 
     # ------------------------------------------------------------------
+    # Warp cluster generation
+    # ------------------------------------------------------------------
+
+    def _generate_warp_cluster(
+        self, start_idx: int, cluster_size: int
+    ) -> List[SolarSystem]:
+        """Generate a mini-cluster of warp-only systems placed far from main cluster."""
+        # Pick a random angle and place far out
+        angle = self.rng.uniform(0, 2 * math.pi)
+        dist_mult = self.rng.uniform(1.5, 2.5)
+        cluster_cx = math.cos(angle) * self.galaxy_radius * dist_mult
+        cluster_cy = math.sin(angle) * self.galaxy_radius * dist_mult
+
+        systems = []
+        for i in range(cluster_size):
+            sys_idx = start_idx + i
+            sys_id = f"sys_{sys_idx:04d}"
+
+            self._planet_ordinal = 0
+            name = self._unique_system_name()
+
+            # Spread within the mini-cluster
+            spread = self.galaxy_radius * 0.08
+            pos_x = round(cluster_cx + self.rng.uniform(-spread, spread), 2)
+            pos_y = round(cluster_cy + self.rng.uniform(-spread, spread), 2)
+            position = {"x": pos_x, "y": pos_y}
+
+            star = self._generate_star(sys_id, name)
+
+            total = self.rng.randint(self.min_bodies, self.max_bodies)
+            counts = self._split_body_counts(total)
+            orbital_bodies: List[CelestialBody] = []
+            body_seq = 0
+
+            planet_radii = sorted(
+                self.rng.uniform(0.15, 35.0) for _ in range(counts["planets"])
+            )
+            for radius in planet_radii:
+                body = self._generate_planet(sys_id, name, body_seq, radius)
+                orbital_bodies.append(body)
+                body_seq += 1
+
+            for _ in range(counts["exoplanets"]):
+                radius = self.rng.uniform(40.0, 250.0)
+                body = self._generate_exoplanet(sys_id, name, body_seq, radius)
+                orbital_bodies.append(body)
+                body_seq += 1
+
+            for ci in range(counts["comets"]):
+                body = self._generate_comet(sys_id, name, body_seq, ci)
+                orbital_bodies.append(body)
+                body_seq += 1
+
+            for ai in range(counts["asteroids"]):
+                radius = self.rng.uniform(1.5, 12.0)
+                body = self._generate_asteroid(sys_id, name, body_seq, radius, ai)
+                orbital_bodies.append(body)
+                body_seq += 1
+
+            systems.append(SolarSystem(
+                id=sys_id,
+                name=name,
+                position=position,
+                star=star,
+                orbital_bodies=orbital_bodies,
+                warp_only=True,
+            ))
+
+        return systems
+
+    # ------------------------------------------------------------------
     # Solar-system generation
     # ------------------------------------------------------------------
 
     def _generate_solar_system(self, sys_index: int) -> SolarSystem:
         self._planet_ordinal = 0  # reset ordinal for planet naming
         sys_id = f"sys_{sys_index:04d}"
-        name = self._system_name()
+        name = self._unique_system_name()
 
         position = {
             "x": round(self.rng.uniform(-self.galaxy_radius, self.galaxy_radius), 2),
@@ -237,10 +396,21 @@ class MapGenerator:
         """
         Distribute *total* bodies into type buckets.
         Ratios are jittered per-system so each system feels distinct.
+        body_distribution affects the fractions.
         """
-        planet_frac = self.rng.uniform(0.20, 0.40)
+        dist = self.body_distribution
+
+        if dist == "rocky":
+            planet_frac = self.rng.uniform(0.35, 0.50)
+        else:
+            planet_frac = self.rng.uniform(0.20, 0.40)
+
         exo_frac = self.rng.uniform(0.00, 0.08)
-        comet_frac = self.rng.uniform(0.10, 0.25)
+
+        if dist == "ice_rich":
+            comet_frac = self.rng.uniform(0.20, 0.35)
+        else:
+            comet_frac = self.rng.uniform(0.10, 0.25)
 
         planets = max(1, round(total * planet_frac))
         exoplanets = round(total * exo_frac)
@@ -295,6 +465,7 @@ class MapGenerator:
 
         size = self._planet_size(subtype)
         resources = self._planet_resources(subtype, orbital_radius)
+        self._moon_names_used = set()
         moons = self._generate_moons(body_id, name, subtype)
 
         return CelestialBody(
@@ -326,13 +497,17 @@ class MapGenerator:
         )[0]
 
         size = self._planet_size(subtype)
+
+        # ice_rich distribution: extra ice multiplier
+        ice_mult = 2.0 if self.body_distribution == "ice_rich" else 1.0
         resources = Resource(
-            minerals=round(self.rng.uniform(500, 8000), 2),
-            rare_minerals=round(self.rng.uniform(50, 1200), 2),
-            ice=round(self.rng.uniform(2000, 30000), 2),
-            gas=round(self.rng.uniform(100, 8000), 2),
+            minerals=round(self.rng.uniform(500, 8000) * self._res_mult, 2),
+            rare_minerals=round(self.rng.uniform(50, 1200) * self._res_mult, 2),
+            ice=round(self.rng.uniform(2000, 30000) * self._res_mult * ice_mult, 2),
+            gas=round(self.rng.uniform(100, 8000) * self._res_mult, 2),
         )
         num_moons = self.rng.randint(0, min(3, self.max_moons))
+        self._moon_names_used = set()
         moons = [self._generate_moon(body_id, name, i) for i in range(num_moons)]
 
         return CelestialBody(
@@ -350,17 +525,18 @@ class MapGenerator:
         self, sys_id: str, system_name: str, seq: int, comet_index: int
     ) -> CelestialBody:
         orbital_radius = self.rng.uniform(5.0, 120.0)
+        ice_mult = 2.0 if self.body_distribution == "ice_rich" else 1.0
         return CelestialBody(
             id=f"{sys_id}_body_{seq:03d}",
-            name=f"{system_name} Comet-{comet_index + 1}",
+            name=self._asteroid_name(system_name),
             body_type=BodyType.COMET,
             size=round(self.rng.uniform(0.001, 0.025), 5),
             orbital_radius=round(orbital_radius, 4),
             resources=Resource(
-                minerals=round(self.rng.uniform(10, 250), 2),
-                rare_minerals=round(self.rng.uniform(0, 30), 2),
-                ice=round(self.rng.uniform(400, 6000), 2),
-                gas=round(self.rng.uniform(10, 600), 2),
+                minerals=round(self.rng.uniform(10, 250) * self._res_mult, 2),
+                rare_minerals=round(self.rng.uniform(0, 30) * self._res_mult, 2),
+                ice=round(self.rng.uniform(400, 6000) * self._res_mult * ice_mult, 2),
+                gas=round(self.rng.uniform(10, 600) * self._res_mult, 2),
             ),
             # Comets never have moons
         )
@@ -373,18 +549,16 @@ class MapGenerator:
         orbital_radius: float,
         asteroid_index: int,
     ) -> CelestialBody:
-        # Give each asteroid a unique numeric designation within the system
-        designation = self.rng.randint(1000, 9999)
         return CelestialBody(
             id=f"{sys_id}_body_{seq:03d}",
-            name=f"{system_name} A-{designation}",
+            name=self._asteroid_name(system_name),
             body_type=BodyType.ASTEROID,
             size=round(self.rng.uniform(0.0001, 0.06), 5),
             orbital_radius=round(orbital_radius, 4),
             resources=Resource(
-                minerals=round(self.rng.uniform(50, 2500), 2),
-                rare_minerals=round(self.rng.uniform(0, 120), 2),
-                ice=round(self.rng.uniform(0, 80), 2),
+                minerals=round(self.rng.uniform(50, 2500) * self._res_mult, 2),
+                rare_minerals=round(self.rng.uniform(0, 120) * self._res_mult, 2),
+                ice=round(self.rng.uniform(0, 80) * self._res_mult, 2),
             ),
             # Asteroids never have moons
         )
@@ -400,17 +574,19 @@ class MapGenerator:
         return [self._generate_moon(parent_id, parent_name, i) for i in range(num)]
 
     def _generate_moon(self, parent_id: str, parent_name: str, index: int) -> Moon:
-        label    = _MOON_LABELS[index] if index < len(_MOON_LABELS) else str(index)
-        bios_val = round(self.rng.uniform(2, 30), 2) if self.rng.random() < 0.05 else 0.0
+        moon_name = self._pick_moon_name(parent_name)
+        bios_chance = 0.05 * self._bio_mult
+        bios_val = round(self.rng.uniform(2, 30) * self._res_mult, 2) if self.rng.random() < bios_chance else 0.0
+        ice_mult = 2.0 if self.body_distribution == "ice_rich" else 1.0
         return Moon(
             id=f"{parent_id}_moon_{index}",
-            name=f"{parent_name}-{label}",
+            name=moon_name,
             size=round(self.rng.uniform(0.005, 0.35), 4),
             resources=Resource(
-                minerals=round(self.rng.uniform(80, 3500), 2),
-                rare_minerals=round(self.rng.uniform(0, 200), 2),
-                ice=round(self.rng.uniform(0, 800), 2),
-                gas=round(self.rng.uniform(0, 60), 2),
+                minerals=round(self.rng.uniform(80, 3500) * self._res_mult, 2),
+                rare_minerals=round(self.rng.uniform(0, 200) * self._res_mult, 2),
+                ice=round(self.rng.uniform(0, 800) * self._res_mult * ice_mult, 2),
+                gas=round(self.rng.uniform(0, 60) * self._res_mult, 2),
                 bios=bios_val,
             ),
         )
@@ -435,11 +611,11 @@ class MapGenerator:
 
     def _pick_planet_subtype(self, orbital_radius: float) -> PlanetSubtype:
         """
-        Subtype probabilities shift with distance from the star:
-          - hot_jupiter  dominates very close orbits
-          - terrestrial / super_earth peaks in the habitable zone
-          - gas_giant / ice_giant dominates beyond the snow line (~3 AU)
+        Subtype probabilities shift with distance from the star.
+        body_distribution further adjusts the weights.
         """
+        dist = self.body_distribution
+
         if orbital_radius < 0.5:
             choices = [PlanetSubtype.HOT_JUPITER, PlanetSubtype.TERRESTRIAL, PlanetSubtype.SUPER_EARTH]
             weights = [55, 30, 15]
@@ -452,6 +628,35 @@ class MapGenerator:
         else:
             choices = [PlanetSubtype.GAS_GIANT, PlanetSubtype.ICE_GIANT, PlanetSubtype.SUPER_EARTH, PlanetSubtype.TERRESTRIAL]
             weights = [40, 40, 12, 8]
+
+        # Apply distribution modifiers
+        if dist == "rocky":
+            # Skew towards terrestrial/super_earth
+            new_weights = []
+            for c, w in zip(choices, weights):
+                if c in (PlanetSubtype.TERRESTRIAL, PlanetSubtype.SUPER_EARTH):
+                    new_weights.append(int(w * 1.8))
+                else:
+                    new_weights.append(w)
+            weights = new_weights
+        elif dist == "gas_heavy":
+            # Gas giant / hot_jupiter weights ×1.5
+            new_weights = []
+            for c, w in zip(choices, weights):
+                if c in (PlanetSubtype.GAS_GIANT, PlanetSubtype.HOT_JUPITER):
+                    new_weights.append(int(w * 1.5))
+                else:
+                    new_weights.append(w)
+            weights = new_weights
+        elif dist == "ice_rich":
+            # Ice giant weight ×2
+            new_weights = []
+            for c, w in zip(choices, weights):
+                if c == PlanetSubtype.ICE_GIANT:
+                    new_weights.append(int(w * 2))
+                else:
+                    new_weights.append(w)
+            weights = new_weights
 
         return self.rng.choices(choices, weights=weights, k=1)[0]
 
@@ -468,39 +673,44 @@ class MapGenerator:
 
     def _planet_resources(self, subtype: PlanetSubtype, orbital_radius: float) -> Resource:
         cold = orbital_radius > 3.0  # beyond approximate snow line
+        ice_mult = 2.0 if self.body_distribution == "ice_rich" else 1.0
+        rm = self._res_mult
+        bm = self._bio_mult
 
         if subtype in (PlanetSubtype.GAS_GIANT, PlanetSubtype.HOT_JUPITER):
             return Resource(
-                minerals=round(self.rng.uniform(0, 150), 2),
-                rare_minerals=round(self.rng.uniform(0, 15), 2),
-                ice=round(self.rng.uniform(0, 600) if cold else 0, 2),
-                gas=round(self.rng.uniform(50000, 2000000), 2),
+                minerals=round(self.rng.uniform(0, 150) * rm, 2),
+                rare_minerals=round(self.rng.uniform(0, 15) * rm, 2),
+                ice=round((self.rng.uniform(0, 600) if cold else 0) * rm * ice_mult, 2),
+                gas=round(self.rng.uniform(50000, 2000000) * rm, 2),
             )
         if subtype == PlanetSubtype.ICE_GIANT:
             return Resource(
-                minerals=round(self.rng.uniform(100, 1500), 2),
-                rare_minerals=round(self.rng.uniform(10, 150), 2),
-                ice=round(self.rng.uniform(8000, 80000), 2),
-                gas=round(self.rng.uniform(2000, 80000), 2),
+                minerals=round(self.rng.uniform(100, 1500) * rm, 2),
+                rare_minerals=round(self.rng.uniform(10, 150) * rm, 2),
+                ice=round(self.rng.uniform(8000, 80000) * rm * ice_mult, 2),
+                gas=round(self.rng.uniform(2000, 80000) * rm, 2),
             )
         if subtype == PlanetSubtype.SUPER_EARTH:
-            bios_val = round(self.rng.uniform(5, 80), 2) if self.rng.random() < 0.15 else 0.0
+            bios_chance = 0.15 * bm
+            bios_val = round(self.rng.uniform(5, 80) * rm, 2) if self.rng.random() < bios_chance else 0.0
             return Resource(
-                minerals=round(self.rng.uniform(3000, 20000), 2),
-                rare_minerals=round(self.rng.uniform(50, 800), 2),
-                ice=round(self.rng.uniform(0, 2000) if cold else 0, 2),
-                gas=round(self.rng.uniform(0, 500), 2),
+                minerals=round(self.rng.uniform(3000, 20000) * rm, 2),
+                rare_minerals=round(self.rng.uniform(50, 800) * rm, 2),
+                ice=round((self.rng.uniform(0, 2000) if cold else 0) * rm * ice_mult, 2),
+                gas=round(self.rng.uniform(0, 500) * rm, 2),
                 bios=bios_val,
             )
         # TERRESTRIAL — higher bios chance in the habitable zone (0.5–2.5 AU)
         in_hab_zone = 0.5 <= orbital_radius <= 2.5
-        bios_chance = 0.40 if in_hab_zone else 0.10
-        bios_val    = round(self.rng.uniform(20, 200), 2) if self.rng.random() < bios_chance else 0.0
+        bios_chance = (0.40 if in_hab_zone else 0.10) * bm
+        bios_chance = min(bios_chance, 1.0)
+        bios_val = round(self.rng.uniform(20, 200) * rm, 2) if self.rng.random() < bios_chance else 0.0
         return Resource(
-            minerals=round(self.rng.uniform(500, 8000), 2),
-            rare_minerals=round(self.rng.uniform(5, 300), 2),
-            ice=round(self.rng.uniform(0, 800) if cold else 0, 2),
-            gas=round(self.rng.uniform(0, 150), 2),
+            minerals=round(self.rng.uniform(500, 8000) * rm, 2),
+            rare_minerals=round(self.rng.uniform(5, 300) * rm, 2),
+            ice=round((self.rng.uniform(0, 800) if cold else 0) * rm * ice_mult, 2),
+            gas=round(self.rng.uniform(0, 150) * rm, 2),
             bios=bios_val,
         )
 
@@ -508,12 +718,79 @@ class MapGenerator:
     # Name generation
     # ------------------------------------------------------------------
 
+    def _unique_system_name(self) -> str:
+        """Generate a unique system name, retrying on collision."""
+        for _ in range(20):
+            name = self._system_name()
+            if name not in self._used_system_names:
+                self._used_system_names.add(name)
+                return name
+        # Fallback: append a number
+        base = self._system_name()
+        n = 2
+        candidate = f"{base}-{n}"
+        while candidate in self._used_system_names:
+            n += 1
+            candidate = f"{base}-{n}"
+        self._used_system_names.add(candidate)
+        return candidate
+
     def _system_name(self) -> str:
-        prefix = self.rng.choice(_SYSTEM_PREFIXES)
-        suffix = self.rng.choice(_SYSTEM_SUFFIXES)
-        return f"{prefix} {suffix}"
+        style = self.rng.choices(["classic", "catalog", "exotic"], weights=[35, 30, 35])[0]
+        self._system_style = style
+        if style == "classic":
+            greek = self.rng.choice(_GREEK)
+            const = self.rng.choice(_CONSTELLATION)
+            return f"{greek} {const}"
+        elif style == "catalog":
+            prefix = self.rng.choice(_CATALOG_PREFIXES)
+            number = self.rng.randint(100, 9999)
+            return f"{prefix} {number}"
+        else:  # exotic
+            word = self.rng.choice(_EXOTIC_NAMES)
+            suffix = self.rng.choice(_EXOTIC_SUFFIXES)
+            return f"{word}{(' ' + suffix) if suffix else ''}"
 
     def _planet_name(self, system_name: str) -> str:
-        numeral = _ROMAN[self._planet_ordinal] if self._planet_ordinal < len(_ROMAN) else str(self._planet_ordinal + 1)
+        """Name a planet based on the current system's naming style."""
+        ordinal = self._planet_ordinal
         self._planet_ordinal += 1
-        return f"{system_name} {numeral}"
+
+        if self._system_style == "catalog":
+            # Use lowercase letter for catalog systems
+            letters = "bcdefghijklmnopqrstuvwxyz"
+            letter = letters[ordinal] if ordinal < len(letters) else str(ordinal + 1)
+            # Space for word-based prefixes (Wolf, Ross, Lalande, Gliese),
+            # no space for short code prefixes (GJ, HD, HIP, KIC, LHS, WISE)
+            parts = system_name.split()
+            if len(parts) >= 1 and len(parts[0]) <= 4 and parts[0].isupper():
+                return f"{system_name}{letter}"
+            else:
+                return f"{system_name} {letter}"
+        else:
+            # Roman numeral for classic and exotic
+            numeral = _ROMAN[ordinal] if ordinal < len(_ROMAN) else str(ordinal + 1)
+            return f"{system_name} {numeral}"
+
+    def _asteroid_name(self, system_name: str) -> str:
+        """Real-style asteroid designation: '(year) Lnnn'"""
+        year = self.rng.randint(2140, 2480)
+        letter = chr(self.rng.randint(ord('A'), ord('Z')))
+        number = self.rng.randint(1, 999)
+        return f"({year}) {letter}{number:03d}"
+
+    def _pick_moon_name(self, parent_name: str) -> str:
+        """Pick a unique moon name from the pool (per parent body)."""
+        available = [n for n in _MOON_POOL if n not in self._moon_names_used]
+        if available:
+            name = self.rng.choice(available)
+            self._moon_names_used.add(name)
+            return name
+        # Pool exhausted — fall back to parent abbreviation + letter
+        letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        idx = len(self._moon_names_used) - len(_MOON_POOL)
+        letter = letters[idx % len(letters)]
+        # Abbreviate parent name
+        words = parent_name.split()
+        abbrev = words[-1][:3].upper() if words else "UNK"
+        return f"{abbrev}-{letter}"

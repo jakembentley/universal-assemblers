@@ -184,15 +184,55 @@ class EntityView:
         if not gs or not galaxy:
             return
         from ..game_state import DiscoveryState
-        items = [
-            (s.name, s.id, None)
-            for s in galaxy.solar_systems
-            if gs.get_state(s.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
-               and s.id != self._system_id
-        ]
+        import math
+
+        # For probes: only show adjacent systems
+        if self._type_value == "probe" and self._system_id:
+            adjacent_ids = set(gs.adjacency.get(self._system_id, []))
+            items = []
+            home_pos = None
+            for s in galaxy.solar_systems:
+                if s.id == self._system_id:
+                    home_pos = s.position
+                    break
+
+            for s in galaxy.solar_systems:
+                if s.id == self._system_id:
+                    continue
+                if s.id not in adjacent_ids:
+                    continue
+                # Calculate distance + ETA
+                dist_str = ""
+                if home_pos:
+                    dx = s.position["x"] - home_pos["x"]
+                    dy = s.position["y"] - home_pos["y"]
+                    dist = math.hypot(dx, dy)
+                    eta_years = 1.0 / 0.25  # travel_speed = 0.25 fraction/year → 4 years
+                    dist_str = f" [{dist:.0f} ly | ~{eta_years:.0f}yr]"
+
+                if s.warp_only:
+                    label = f"{s.name}{dist_str}  [Warp Drive required]"
+                    items.append((label, f"_warp_{s.id}", (100, 60, 140)))
+                else:
+                    state = gs.get_state(s.id)
+                    color = None
+                    if state not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
+                        color = (90, 120, 160)
+                    items.append((f"{s.name}{dist_str}", s.id, color))
+        else:
+            # Drop ships and other ships: all discovered/colonized systems
+            items = [
+                (s.name, s.id, None)
+                for s in galaxy.solar_systems
+                if gs.get_state(s.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
+                   and s.id != self._system_id
+            ]
         self._sys_list.set_items(items)
 
     def _on_send_system_select(self, sys_id: str) -> None:
+        # Ignore warp-only pseudo-IDs
+        if sys_id.startswith("_warp_"):
+            return
         self._send_system_id = sys_id
 
     # ------------------------------------------------------------------

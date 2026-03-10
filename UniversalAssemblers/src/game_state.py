@@ -302,9 +302,26 @@ class GameState:
 
         # Entity roster — resolve "home_body" / "home_system" location tokens
         home_system_id = home.id
-        home_body_id   = (
-            home.orbital_bodies[0].id if home.orbital_bodies else home.id
-        )
+        # Pick the best terrestrial/super_earth planet in the habitable zone (0.5–2.5 AU)
+        from .models.celestial import BodyType, PlanetSubtype
+        best_body = None
+        for body in home.orbital_bodies:
+            if body.body_type == BodyType.PLANET and body.subtype in (
+                PlanetSubtype.TERRESTRIAL.value, PlanetSubtype.SUPER_EARTH.value
+            ) and 0.5 <= body.orbital_radius <= 2.5:
+                if best_body is None or body.resources.bios > best_body.resources.bios:
+                    best_body = body
+        if best_body is None:
+            # Fall back to any terrestrial/super_earth planet
+            for body in home.orbital_bodies:
+                if body.body_type == BodyType.PLANET and body.subtype in (
+                    PlanetSubtype.TERRESTRIAL.value, PlanetSubtype.SUPER_EARTH.value
+                ):
+                    best_body = body
+                    break
+        if best_body is None and home.orbital_bodies:
+            best_body = home.orbital_bodies[0]
+        home_body_id = best_body.id if best_body else home.id
         for cat, type_val, loc_token, count in STARTING_ENTITIES:
             loc_id = home_system_id if loc_token == "home_system" else home_body_id
             gs.entity_roster.add(cat, type_val, loc_id, count)
@@ -327,16 +344,19 @@ class GameState:
         if not self.galaxy:
             return
         rng = random.Random(self.galaxy.seed ^ 0xB10B1AB)
+        bio_uplift_mult = self.galaxy.parameters.get("bio_uplift_mult", 1.0)
         for sys in self.galaxy.solar_systems:
             for body in sys.orbital_bodies:
                 if body.resources.bios > 0:
                     self.bio_state.add(
-                        make_bio_population(body.id, sys.id, body.resources.bios, rng)
+                        make_bio_population(body.id, sys.id, body.resources.bios, rng,
+                                            uplift_multiplier=bio_uplift_mult)
                     )
                 for moon in body.moons:
                     if moon.resources.bios > 0:
                         self.bio_state.add(
-                            make_bio_population(moon.id, sys.id, moon.resources.bios, rng)
+                            make_bio_population(moon.id, sys.id, moon.resources.bios, rng,
+                                                uplift_multiplier=bio_uplift_mult)
                         )
 
     # ------------------------------------------------------------------
@@ -359,11 +379,14 @@ class GameState:
     def _build_adjacency(galaxy: "Galaxy", k: int = 3) -> dict[str, list[str]]:
         systems = galaxy.solar_systems
         adj: dict[str, list[str]] = {s.id: [] for s in systems}
+        # Warp-only systems get empty adjacency lists and are excluded from main graph
         for i, sys_a in enumerate(systems):
+            if sys_a.warp_only:
+                continue
             ax, ay = sys_a.position["x"], sys_a.position["y"]
             distances = []
             for j, sys_b in enumerate(systems):
-                if i == j:
+                if i == j or sys_b.warp_only:
                     continue
                 bx, by = sys_b.position["x"], sys_b.position["y"]
                 distances.append((math.hypot(bx - ax, by - ay), sys_b.id))

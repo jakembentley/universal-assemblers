@@ -23,12 +23,16 @@ import src.gui.game_view
 import src.gui.main_menu
 import src.gui.map_panel
 import src.gui.nav_panel
+import src.gui.new_game_panel
 import src.gui.pause_menu
+import src.gui.taskbar
+import src.gui.tech_view
 import src.gui.widgets
 import src.models.celestial
 import src.models.entity
 import src.models.resource
 import src.models.tech
+import src.simulation
 
 # -- Game-state assertions --
 from src.game_state import GameState

@@ -169,13 +169,16 @@ class SolarSystem:
     """
     A stellar system containing one star and its collection of orbital bodies.
 
-    position -- Galactic (x, y) coordinates in light-years from the map origin.
+    position  -- Galactic (x, y) coordinates in light-years from the map origin.
+    warp_only -- True if this system requires a Warp Drive to reach; not connected
+                 to the main adjacency graph.
     """
     id: str
     name: str
     position: dict           # {"x": float, "y": float}
     star: Star
     orbital_bodies: List[CelestialBody] = field(default_factory=list)
+    warp_only: bool = False
 
     # Convenience counts (populated after generation for fast reads)
     @property
@@ -199,7 +202,7 @@ class SolarSystem:
         return sum(len(b.moons) for b in self.orbital_bodies)
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "id": self.id,
             "name": self.name,
             "position": self.position,
@@ -213,6 +216,9 @@ class SolarSystem:
             },
             "orbital_bodies": [b.to_dict() for b in self.orbital_bodies],
         }
+        if self.warp_only:
+            d["warp_only"] = True
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "SolarSystem":
@@ -222,6 +228,7 @@ class SolarSystem:
             position=d["position"],
             star=Star.from_dict(d["star"]),
             orbital_bodies=[CelestialBody.from_dict(b) for b in d.get("orbital_bodies", [])],
+            warp_only=d.get("warp_only", False),
         )
 
 

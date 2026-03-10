@@ -18,6 +18,7 @@ from .game_clock import GameClock
 from .pause_menu import PauseMenu
 from .entity_view import EntityView
 from .tech_view import TechView
+from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
@@ -42,10 +43,11 @@ class App:
         self.galaxy_view: GalaxyView | None = None
         self.game_view:   GameView  | None  = None
 
-        self.game_clock  = GameClock()
-        self.pause_menu  = PauseMenu(self)
-        self.entity_view = EntityView(self)
-        self.tech_view   = TechView(self)
+        self.game_clock     = GameClock()
+        self.pause_menu     = PauseMenu(self)
+        self.entity_view    = EntityView(self)
+        self.tech_view      = TechView(self)
+        self.new_game_panel = NewGamePanel(self)
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -123,8 +125,23 @@ class App:
     # Menu actions
 
     def start_new_game(self) -> None:
-        gen         = MapGenerator(num_solar_systems=10, galaxy_name="Sector Zero")
+        """Open the new game settings panel instead of starting directly."""
+        self.new_game_panel = NewGamePanel(self)
+        self.state = "new_game_settings"
+
+    def launch_game(self, settings: dict) -> None:
+        """Called by NewGamePanel when START is clicked."""
+        gen = MapGenerator(
+            num_solar_systems=settings.get("num_solar_systems", 12),
+            galaxy_name=settings.get("galaxy_name", "Unnamed Sector"),
+            resource_density=settings.get("resource_density", "normal"),
+            bio_uplift_rate=settings.get("bio_uplift_rate", "normal"),
+            body_distribution=settings.get("body_distribution", "balanced"),
+            warp_clusters=settings.get("warp_clusters", 1),
+        )
         self.galaxy = gen.generate()
+        import os
+        os.makedirs("maps", exist_ok=True)
         MapGenerator.save(self.galaxy, "maps/autosave.json")
         self._selected_system_idx = 0
         self.selected_body_id     = None
@@ -234,6 +251,8 @@ class App:
                             self.close_entity_view()
                         elif self.pause_menu.is_active:
                             self.resume_game()
+                        elif self.state == "new_game_settings":
+                            self.state = "menu"
                         elif self.state in ("galaxy", "system"):
                             self.pause_menu.activate()
                             self.game_clock.save_and_pause()
@@ -260,6 +279,10 @@ class App:
             if self.state == "menu":
                 self.main_menu.handle_events(events)
                 self.main_menu.draw(self.screen)
+            elif self.state == "new_game_settings":
+                self.screen.fill((8, 8, 20))
+                self.new_game_panel.handle_events(events)
+                self.new_game_panel.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
                 if not self.pause_menu.is_active and not self.tech_view.is_active:
                     self.galaxy_view.handle_events(events)
