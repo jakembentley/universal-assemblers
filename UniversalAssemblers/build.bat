@@ -1,6 +1,6 @@
 @echo off
 echo Building UniversalAssemblers...
-C:\Users\Admin\anaconda3\Scripts\pyinstaller.exe UniversalAssemblers.spec --noconfirm
+%USERPROFILE%\anaconda3\Scripts\pyinstaller.exe UniversalAssemblers.spec --noconfirm
 set BUILD_RESULT=%ERRORLEVEL%
 if %BUILD_RESULT% == 0 (
     echo.

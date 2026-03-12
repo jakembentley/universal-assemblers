@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Run the game (Windows — python/python3 aliases are broken; use full Anaconda path)
-/c/Users/Admin/anaconda3/python.exe run_gui.py
+$env:USERPROFILE\anaconda3\python.exe run_gui.py
 
 # Generate a map from CLI (no GUI)
-/c/Users/Admin/anaconda3/python.exe main.py --seed 42 --systems 15
+$env:USERPROFILE\anaconda3\python.exe main.py --seed 42 --systems 15
 
 # Build standalone .exe (Windows, requires PyInstaller)
 build.bat
