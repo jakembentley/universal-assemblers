@@ -1,4 +1,6 @@
 @echo off
+echo Installing dependencies...
+%USERPROFILE%\anaconda3\python.exe -m pip install -r requirements.txt --quiet
 echo Building UniversalAssemblers...
 %USERPROFILE%\anaconda3\Scripts\pyinstaller.exe UniversalAssemblers.spec --noconfirm
 set BUILD_RESULT=%ERRORLEVEL%
