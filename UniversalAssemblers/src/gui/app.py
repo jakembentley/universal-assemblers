@@ -227,6 +227,23 @@ class App:
             print(f"[file dialog] {exc}")
             return None
 
+    def change_resolution(self, w: int, h: int) -> None:
+        """Apply a new window resolution and rebuild all geometry-dependent views."""
+        from . import constants as _c
+        _c.WINDOW_WIDTH  = w
+        _c.WINDOW_HEIGHT = h
+        _c.TOP_H = h - _c.ENT_H - _c.TASKBAR_H
+        _c.MAP_W = w - _c.NAV_W
+        self.screen = pygame.display.set_mode((w, h))
+        # Rebuild views that cache resolution-dependent geometry
+        self.pause_menu  = PauseMenu(self)
+        self.entity_view = EntityView(self)
+        self.tech_view   = TechView(self)
+        if self.galaxy_view:
+            self.galaxy_view = GalaxyView(self)
+        if self.game_view:
+            self.game_view = GameView(self)
+
     def quit(self) -> None:
         pygame.quit()
         sys.exit()

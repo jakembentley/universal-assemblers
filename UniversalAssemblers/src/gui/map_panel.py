@@ -15,8 +15,9 @@ import time
 import random
 
 import pygame
+from . import constants as _c
 from .constants import (
-    NAV_W, MAP_W, TOP_H, TASKBAR_H, HEADER_H, PADDING,
+    NAV_W, TASKBAR_H, HEADER_H, PADDING,
     C_BG, C_PANEL, C_BORDER, C_HEADER, C_ACCENT, C_TEXT, C_TEXT_DIM,
     C_SELECTED, C_HOVER, C_BTN, C_BTN_HOV, C_BTN_TXT,
     STAR_COLORS, BODY_COLORS, font,
@@ -33,7 +34,7 @@ class MapPanel:
 
     def __init__(self, app) -> None:
         self.app  = app
-        self.rect = pygame.Rect(NAV_W, TASKBAR_H, MAP_W, TOP_H)
+        self.rect = pygame.Rect(NAV_W, TASKBAR_H, _c.MAP_W, _c.TOP_H)
 
         self._mode = "system"    # "system" | "planet"
         self._zoom_body_id: str | None = None
@@ -60,8 +61,8 @@ class MapPanel:
         rng = random.Random(0xCAFEBABE)
         self._bg_stars = [
             (
-                rng.randint(NAV_W, NAV_W + MAP_W),
-                rng.randint(TASKBAR_H, TASKBAR_H + TOP_H),
+                rng.randint(NAV_W, NAV_W + _c.MAP_W),
+                rng.randint(TASKBAR_H, TASKBAR_H + _c.TOP_H),
                 rng.randint(1, 2),
                 rng.uniform(0.3, 1.0),
             )
@@ -246,7 +247,10 @@ class MapPanel:
             pygame.draw.circle(surface, col, (bx, by), max(2, vis_r))
             self._hit_targets.append((body.id, bx, by, max(vis_r + 3, 8)))
 
-        # 5. Labels for selected body
+        # 5. Ships animated in orbit
+        self._draw_ships(surface, system, cx, cy, max_r_px, t)
+
+        # 6. Labels for selected body
         self._draw_system_label(surface, system)
 
     def _draw_probe_required(self, surface: pygame.Surface, system) -> None:
@@ -393,6 +397,80 @@ class MapPanel:
             gs    = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
             pygame.draw.circle(gs, (*color[:3], alpha), (r, r), r)
             surface.blit(gs, (cx - r, cy - r), special_flags=pygame.BLEND_RGBA_ADD)
+
+    # ------------------------------------------------------------------
+    # Ship animation
+
+    _SHIP_COLORS: dict = {
+        "probe":         (0, 220, 255),
+        "drop_ship":     (255, 180, 60),
+        "mining_vessel": (220, 200, 80),
+        "transport":     (140, 220, 140),
+        "warship":       (255, 80,  80),
+    }
+    _SHIP_COLOR_DEFAULT = (180, 180, 220)
+
+    def _draw_ships(
+        self,
+        surface: pygame.Surface,
+        system,
+        cx: int, cy: int,
+        max_r_px: float,
+        t: float,
+    ) -> None:
+        gs = self.app.game_state
+        if not gs:
+            return
+
+        # Ships stationed at system level orbit close to the star
+        sys_ships = [i for i in gs.entity_roster.at(system.id) if i.category == "ship"]
+        for idx, inst in enumerate(sys_ships):
+            base_r = 36 + idx * 16
+            speed  = 0.9 / (base_r / 30) ** 0.5
+            phase  = (hash(inst.type_value + "sys") % 628) / 100.0
+            col    = self._SHIP_COLORS.get(inst.type_value, self._SHIP_COLOR_DEFAULT)
+            for k in range(min(inst.count, 3)):
+                angle = t * 2 * speed + phase + k * 0.45
+                sx = int(cx + math.cos(angle) * base_r)
+                sy = int(cy + math.sin(angle) * base_r)
+                self._draw_ship_icon(surface, sx, sy, angle + math.pi / 2, col)
+
+        # Ships at body level orbit just outside their body
+        for body in system.orbital_bodies:
+            body_r_px   = self._au_to_px(body.orbital_radius, max_r_px)
+            body_angle  = self._orbit_angle(body.id, body.orbital_radius, t)
+            bx = int(cx + math.cos(body_angle) * body_r_px)
+            by = int(cy + math.sin(body_angle) * body_r_px)
+
+            body_ships = [i for i in gs.entity_roster.at(body.id) if i.category == "ship"]
+            for idx, inst in enumerate(body_ships):
+                orbit_r = 16 + idx * 10
+                speed   = 1.2
+                phase   = (hash(inst.type_value + body.id) % 628) / 100.0
+                col     = self._SHIP_COLORS.get(inst.type_value, self._SHIP_COLOR_DEFAULT)
+                for k in range(min(inst.count, 3)):
+                    angle = t * 2 * speed + phase + k * 0.5
+                    sx = int(bx + math.cos(angle) * orbit_r)
+                    sy = int(by + math.sin(angle) * orbit_r)
+                    self._draw_ship_icon(surface, sx, sy, angle + math.pi / 2, col)
+
+    @staticmethod
+    def _draw_ship_icon(
+        surface: pygame.Surface,
+        x: int, y: int,
+        heading: float,
+        color: tuple,
+        size: int = 4,
+    ) -> None:
+        tip   = (int(x + math.cos(heading) * size * 2),
+                 int(y + math.sin(heading) * size * 2))
+        left  = (int(x + math.cos(heading + 2.3) * size),
+                 int(y + math.sin(heading + 2.3) * size))
+        right = (int(x + math.cos(heading - 2.3) * size),
+                 int(y + math.sin(heading - 2.3) * size))
+        pygame.draw.polygon(surface, color, [tip, left, right])
+
+    # ------------------------------------------------------------------
 
     def on_system_changed(self) -> None:
         self._mode = "system"

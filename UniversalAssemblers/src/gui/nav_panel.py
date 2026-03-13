@@ -13,18 +13,15 @@ Layout (top to bottom, within NAV_W x TOP_H):
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    NAV_W, TOP_H, TASKBAR_H, HEADER_H, ROW_H, PADDING,
+    NAV_W, TASKBAR_H, HEADER_H, ROW_H, PADDING,
     C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
-    C_SELECTED, C_HOVER, C_SEP, C_WARN, BODY_COLORS, STAR_COLORS,
+    C_SELECTED, C_HOVER, C_SEP, C_WARN, C_SCROLLBAR, BODY_COLORS, STAR_COLORS,
     font,
 )
 from .widgets import ScrollableList, draw_panel, draw_separator, TextInput
-
-
-_SYS_H   = int(TOP_H * 0.28)
-_BODY_H  = int(TOP_H * 0.37)
-_STAT_H  = TOP_H - _SYS_H - _BODY_H
+from ..game_state import DiscoveryState
 
 
 class NavPanel:
@@ -32,9 +29,17 @@ class NavPanel:
     def __init__(self, app) -> None:
         self.app = app
 
+        _top_h  = _c.TOP_H
+        _SYS_H  = int(_top_h * 0.28)
+        _BODY_H = int(_top_h * 0.37)
+        _STAT_H = _top_h - _SYS_H - _BODY_H
+
         sys_rect   = pygame.Rect(0, TASKBAR_H,                       NAV_W, _SYS_H)
         body_rect  = pygame.Rect(0, TASKBAR_H + _SYS_H,             NAV_W, _BODY_H)
         self.stat_rect = pygame.Rect(0, TASKBAR_H + _SYS_H + _BODY_H, NAV_W, _STAT_H)
+
+        self._stat_scroll: int   = 0
+        self._stat_content_h: int = 300  # updated each draw pass
 
         self._sys_list  = ScrollableList(sys_rect,  "Solar Systems", on_select=self._on_system_select)
         self._body_list = ScrollableList(body_rect, "Celestial Bodies", on_select=self._on_body_select)
@@ -70,10 +75,14 @@ class NavPanel:
         if not galaxy:
             self._sys_list.set_items([])
             return
-        items = [
-            (s.name, s.id, STAR_COLORS.get(s.star.star_type.value))
-            for s in galaxy.solar_systems
-        ]
+        gs = self.app.game_state
+        items = []
+        for s in galaxy.solar_systems:
+            if gs:
+                state = gs.get_state(s.id)
+                if state not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
+                    continue
+            items.append((s.name, s.id, STAR_COLORS.get(s.star.star_type.value)))
         self._sys_list.set_items(items)
         sys = self.app.selected_system
         if sys:
@@ -151,6 +160,7 @@ class NavPanel:
 
     def on_body_changed(self) -> None:
         self._body_list.set_selected(self.app.selected_body_id)
+        self._stat_scroll = 0
 
     # ------------------------------------------------------------------
     # Events
@@ -210,6 +220,14 @@ class NavPanel:
                         self._editing_body = edit_obj
                 continue
 
+            if event.type == pygame.MOUSEWHEEL:
+                if self.stat_rect.collidepoint(pygame.mouse.get_pos()):
+                    visible_h = self.stat_rect.height - HEADER_H
+                    max_scroll = max(0, self._stat_content_h - visible_h)
+                    self._stat_scroll = max(0, min(max_scroll,
+                                                   self._stat_scroll - event.y * ROW_H))
+                    continue
+
             self._sys_list.handle_event(event)
             self._body_list.handle_event(event)
 
@@ -239,7 +257,8 @@ class NavPanel:
             return
 
         x = content.x + PADDING
-        y = content.y + 6
+        _content_top = content.y + 6
+        y = _content_top - self._stat_scroll
 
         def txt(label: str, value: str, label_col=C_TEXT_DIM, value_col=C_TEXT) -> None:
             nonlocal y
@@ -368,6 +387,19 @@ class NavPanel:
                         txt("Aggression", f"{pop.aggression:.0%}",
                             value_col=C_WARN if pop.aggression > 0.65 else C_TEXT)
                         txt("Growth",     f"{pop.growth_rate:.1%}/yr")
+
+        # Record total content height for scroll clamping
+        self._stat_content_h = max(1, y + self._stat_scroll - _content_top)
+
+        # Scrollbar
+        visible_h = content.height
+        if self._stat_content_h > visible_h:
+            bar_h = max(20, int(visible_h * visible_h / self._stat_content_h))
+            max_scroll = self._stat_content_h - visible_h
+            bar_y = content.y + int((visible_h - bar_h) * self._stat_scroll / max_scroll)
+            pygame.draw.rect(surface, C_SCROLLBAR,
+                             pygame.Rect(content.right - 5, bar_y, 4, bar_h),
+                             border_radius=2)
 
         surface.set_clip(old_clip)
 

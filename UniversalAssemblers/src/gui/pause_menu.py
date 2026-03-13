@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT,
-    C_ACCENT, C_BORDER, C_BTN, C_BTN_HOV, C_BTN_TXT, C_PANEL, font,
+    C_ACCENT, C_BORDER, C_BTN, C_BTN_HOV, C_BTN_TXT, C_PANEL, C_TEXT_DIM, font,
 )
 from .widgets import Button
 
@@ -21,10 +21,17 @@ if TYPE_CHECKING:
 
 
 _PANEL_W = 320
-_PANEL_H = 360
+_PANEL_H = 420
 _BTN_W   = 260
 _BTN_H   = 48
 _BTN_GAP = 12
+
+_RESOLUTIONS = [
+    ("1280 × 800",   1280,  800),
+    ("1280 × 960",   1280,  960),
+    ("1600 × 900",   1600,  900),
+    ("1920 × 1080",  1920, 1080),
+]
 
 
 def _make_button(label: str, panel_rect: pygame.Rect, row: int, cb) -> Button:
@@ -38,12 +45,13 @@ class PauseMenu:
 
     def __init__(self, app) -> None:
         self.app = app
-        self.is_active: bool  = False
-        self._sub_active: bool = False
+        self.is_active: bool       = False
+        self._sub_active: bool     = False
+        self._settings_active: bool = False
 
         # Panel geometry (centred on screen)
-        px = (WINDOW_WIDTH  - _PANEL_W) // 2
-        py = (WINDOW_HEIGHT - _PANEL_H) // 2
+        px = (_c.WINDOW_WIDTH  - _PANEL_W) // 2
+        py = (_c.WINDOW_HEIGHT - _PANEL_H) // 2
         self._panel_rect = pygame.Rect(px, py, _PANEL_W, _PANEL_H)
 
         # Pre-build button lists (callbacks reference self so lambdas are fine)
@@ -51,24 +59,30 @@ class PauseMenu:
             _make_button("RESUME",    self._panel_rect, 0, self._resume),
             _make_button("SAVE GAME", self._panel_rect, 1, self._save),
             _make_button("LOAD GAME", self._panel_rect, 2, self._load),
-            _make_button("EXIT GAME", self._panel_rect, 3, self._open_exit_sub),
+            _make_button("SETTINGS",  self._panel_rect, 3, self._open_settings_sub),
+            _make_button("EXIT GAME", self._panel_rect, 4, self._open_exit_sub),
         ]
         self._sub_buttons: list[Button] = [
             _make_button("EXIT TO MENU",    self._panel_rect, 0, self._exit_to_menu),
             _make_button("EXIT TO DESKTOP", self._panel_rect, 1, self._exit_to_desktop),
             _make_button("◀  BACK",         self._panel_rect, 2, self._close_exit_sub),
         ]
+        self._settings_buttons: list[Button] = [
+            _make_button(label, self._panel_rect, i, self._make_res_callback(w, h))
+            for i, (label, w, h) in enumerate(_RESOLUTIONS)
+        ] + [_make_button("◀  BACK", self._panel_rect, len(_RESOLUTIONS), self._close_settings_sub)]
 
         # Reusable dim overlay surface
-        self._dim = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        self._dim = pygame.Surface((_c.WINDOW_WIDTH, _c.WINDOW_HEIGHT), pygame.SRCALPHA)
         self._dim.fill((5, 5, 20, 180))
 
     # ------------------------------------------------------------------
     # Activation
 
     def activate(self) -> None:
-        self.is_active   = True
-        self._sub_active = False
+        self.is_active      = True
+        self._sub_active    = False
+        self._settings_active = False
 
     # ------------------------------------------------------------------
     # Button callbacks
@@ -84,6 +98,18 @@ class PauseMenu:
 
     def _open_exit_sub(self) -> None:
         self._sub_active = True
+
+    def _open_settings_sub(self) -> None:
+        self._settings_active = True
+
+    def _close_settings_sub(self) -> None:
+        self._settings_active = False
+
+    def _make_res_callback(self, w: int, h: int):
+        def _cb():
+            self.app.change_resolution(w, h)
+            self._settings_active = False
+        return _cb
 
     def _exit_to_menu(self) -> None:
         self.app.exit_to_menu()
@@ -101,7 +127,12 @@ class PauseMenu:
         # ESC is handled by App.run() for both open and close; only route
         # mouse/button events here so the menu doesn't close itself the same
         # frame it was opened.
-        buttons = self._sub_buttons if self._sub_active else self._main_buttons
+        if self._settings_active:
+            buttons = self._settings_buttons
+        elif self._sub_active:
+            buttons = self._sub_buttons
+        else:
+            buttons = self._main_buttons
         for event in events:
             for btn in buttons:
                 btn.handle_event(event)
@@ -132,6 +163,18 @@ class PauseMenu:
         )
 
         # 4. Buttons
-        buttons = self._sub_buttons if self._sub_active else self._main_buttons
-        for btn in buttons:
-            btn.draw(surface)
+        if self._settings_active:
+            lbl = font(14, bold=True).render("RESOLUTION", True, C_ACCENT)
+            surface.blit(lbl, lbl.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + 56)))
+            cur = font(11).render(
+                f"Current: {_c.WINDOW_WIDTH} × {_c.WINDOW_HEIGHT}", True, C_TEXT_DIM
+            )
+            surface.blit(cur, cur.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + 74)))
+            for btn in self._settings_buttons:
+                btn.draw(surface)
+        elif self._sub_active:
+            for btn in self._sub_buttons:
+                btn.draw(surface)
+        else:
+            for btn in self._main_buttons:
+                btn.draw(surface)

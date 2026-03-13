@@ -9,8 +9,9 @@ the entity detail view.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, ENT_H, TOP_H, TASKBAR_H, HEADER_H, PADDING, ROW_H,
+    ENT_H, TASKBAR_H, HEADER_H, PADDING, ROW_H,
     C_PANEL, C_BORDER, C_HEADER, C_ACCENT, C_TEXT, C_TEXT_DIM,
     C_SEP, C_SELECTED, C_HOVER, font,
 )
@@ -63,7 +64,7 @@ class EntitiesPanel:
 
     def __init__(self, app) -> None:
         self.app  = app
-        self.rect = pygame.Rect(0, TOP_H + TASKBAR_H, WINDOW_WIDTH, ENT_H)
+        self.rect = pygame.Rect(0, _c.TOP_H + TASKBAR_H, _c.WINDOW_WIDTH, ENT_H)
         # Hit rects populated each draw(): (rect, category, type_val)
         self._hit_rects: list[tuple[pygame.Rect, str, str]] = []
 

@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING
 
 import pygame
 
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, C_BG, C_ACCENT, C_TEXT, C_TEXT_DIM,
+    C_BG, C_ACCENT, C_TEXT, C_TEXT_DIM,
     C_BTN, C_BTN_HOV, C_BTN_TXT, C_BORDER, C_SELECTED, STAR_COLORS, font,
 )
 from ..game_state import DiscoveryState
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 TOP_BAR_H    = 50
 BOTTOM_BAR_H = 60
-MAP_RECT     = pygame.Rect(10, TOP_BAR_H + 5, WINDOW_WIDTH - 20, WINDOW_HEIGHT - TOP_BAR_H - BOTTOM_BAR_H - 10)
 
 # ---------------------------------------------------------------------------
 # Visual constants
@@ -54,8 +54,17 @@ class GalaxyView:
         self._star_field: list[tuple[int, int, int]] = []  # (x, y, brightness)
         self._screen_pos: dict[str, tuple[int, int]] = {}
 
+        # Map rect — computed from current window size
+        self.self.MAP_RECT = pygame.Rect(
+            10, TOP_BAR_H + 5,
+            _c.WINDOW_WIDTH - 20,
+            _c.WINDOW_HEIGHT - TOP_BAR_H - BOTTOM_BAR_H - 10,
+        )
+
         # Enter-system button
-        self._btn_rect = pygame.Rect(WINDOW_WIDTH - 170, WINDOW_HEIGHT - BOTTOM_BAR_H + 10, 155, 36)
+        self._btn_rect = pygame.Rect(
+            _c.WINDOW_WIDTH - 170, _c.WINDOW_HEIGHT - BOTTOM_BAR_H + 10, 155, 36
+        )
         self._btn_hovered = False
 
         # Fog surface (rebuilt when discovery state changes)
@@ -76,8 +85,8 @@ class GalaxyView:
         rng = random.Random(galaxy.seed)
         self._star_field = [
             (
-                rng.randint(MAP_RECT.left, MAP_RECT.right),
-                rng.randint(MAP_RECT.top,  MAP_RECT.bottom),
+                rng.randint(self.MAP_RECT.left, self.MAP_RECT.right),
+                rng.randint(self.MAP_RECT.top,  self.MAP_RECT.bottom),
                 rng.randint(30, 110),
             )
             for _ in range(_STAR_FIELD_COUNT)
@@ -105,10 +114,10 @@ class GalaxyView:
         cy = (min_y + max_y) / 2
 
         # Scale preserving aspect ratio
-        scale = min(MAP_RECT.width / span_x, MAP_RECT.height / span_y)
+        scale = min(self.MAP_RECT.width / span_x, self.MAP_RECT.height / span_y)
 
-        map_cx = MAP_RECT.centerx
-        map_cy = MAP_RECT.centery
+        map_cx = self.MAP_RECT.centerx
+        map_cy = self.MAP_RECT.centery
 
         self._screen_pos = {}
         for s in systems:
@@ -414,9 +423,10 @@ class GalaxyView:
         pygame.draw.polygon(surface, color, points, 2)
 
     def _draw_top_bar(self, surface: pygame.Surface) -> None:
-        bar = pygame.Rect(0, 0, WINDOW_WIDTH, TOP_BAR_H)
+        W = _c.WINDOW_WIDTH
+        bar = pygame.Rect(0, 0, W, TOP_BAR_H)
         pygame.draw.rect(surface, (10, 10, 28), bar)
-        pygame.draw.line(surface, C_BORDER, (0, TOP_BAR_H - 1), (WINDOW_WIDTH, TOP_BAR_H - 1))
+        pygame.draw.line(surface, C_BORDER, (0, TOP_BAR_H - 1), (W, TOP_BAR_H - 1))
 
         galaxy = self.app.galaxy
         gs     = self.app.game_state
@@ -424,19 +434,20 @@ class GalaxyView:
         total  = len(galaxy.solar_systems)
 
         title = font(18, bold=True).render(galaxy.name.upper(), True, C_ACCENT)
-        surface.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 8))
+        surface.blit(title, (W // 2 - title.get_width() // 2, 8))
 
         info = font(13).render(
             f"Discovered: {disc}/{total}   Seed: {galaxy.seed}",
             True, C_TEXT_DIM,
         )
-        surface.blit(info, (WINDOW_WIDTH // 2 - info.get_width() // 2, 30))
+        surface.blit(info, (W // 2 - info.get_width() // 2, 30))
 
     def _draw_bottom_bar(self, surface: pygame.Surface) -> None:
-        bar_y = WINDOW_HEIGHT - BOTTOM_BAR_H
-        bar   = pygame.Rect(0, bar_y, WINDOW_WIDTH, BOTTOM_BAR_H)
+        W     = _c.WINDOW_WIDTH
+        bar_y = _c.WINDOW_HEIGHT - BOTTOM_BAR_H
+        bar   = pygame.Rect(0, bar_y, W, BOTTOM_BAR_H)
         pygame.draw.rect(surface, (10, 10, 28), bar)
-        pygame.draw.line(surface, C_BORDER, (0, bar_y), (WINDOW_WIDTH, bar_y))
+        pygame.draw.line(surface, C_BORDER, (0, bar_y), (W, bar_y))
 
         # Selected system info (left side)
         gs = self.app.game_state

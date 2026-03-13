@@ -10,8 +10,9 @@ the top-right corner.  This bar handles everything to the left of the clock.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, TASKBAR_H,
+    TASKBAR_H,
     C_BORDER, C_ACCENT, font,
 )
 from .widgets import Button
@@ -57,9 +58,10 @@ class TaskBar:
             self._tech_btn.handle_event(event)
 
     def draw(self, surface: pygame.Surface) -> None:
-        bar = pygame.Rect(0, 0, WINDOW_WIDTH, TASKBAR_H)
+        W = _c.WINDOW_WIDTH
+        bar = pygame.Rect(0, 0, W, TASKBAR_H)
         pygame.draw.rect(surface, (10, 10, 28), bar)
-        pygame.draw.line(surface, C_BORDER, (0, TASKBAR_H - 1), (WINDOW_WIDTH, TASKBAR_H - 1))
+        pygame.draw.line(surface, C_BORDER, (0, TASKBAR_H - 1), (W, TASKBAR_H - 1))
 
         self._galaxy_btn.draw(surface)
         self._tech_btn.draw(surface)
@@ -68,7 +70,7 @@ class TaskBar:
         label_text = self._build_label()
         if label_text:
             btn_right = 8 + 120 + 8 + 110 + 16
-            usable_cx = btn_right + (WINDOW_WIDTH - _CLOCK_RESERVE - btn_right) // 2
+            usable_cx = btn_right + (W - _CLOCK_RESERVE - btn_right) // 2
             lbl = font(13, bold=True).render(label_text, True, C_ACCENT)
             surface.blit(lbl, lbl.get_rect(center=(usable_cx, TASKBAR_H // 2)))
 
