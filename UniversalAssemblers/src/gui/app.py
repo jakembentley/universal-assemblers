@@ -253,6 +253,71 @@ class App:
         sys.exit()
 
     # ------------------------------------------------------------------
+    # Toast notifications
+
+    def _process_sim_events(self) -> None:
+        if not self.game_state:
+            return
+        now = pygame.time.get_ticks()
+        TTL = 6000   # ms
+        from ..models.tech import TECH_TREE
+        for ev in self.game_state.pop_sim_events():
+            etype = ev.get("type", "")
+            if etype == "tech_complete":
+                tid = ev.get("tech_id", "")
+                name = TECH_TREE[tid].name if tid in TECH_TREE else tid
+                msg = f"TECH UNLOCKED: {name}"
+                col = (80, 220, 120)
+            elif etype == "entity_built":
+                ent = (ev.get("entity_type") or "").replace("_", " ").title()
+                msg = f"BUILT: {ent}"
+                col = (80, 200, 255)
+            elif etype in ("drop_ship_arrived", "probe_arrived"):
+                dest = ev.get("destination") or ev.get("system_id") or "?"
+                if self.galaxy:
+                    sys_obj = next((s for s in self.galaxy.solar_systems if s.id == dest), None)
+                    if sys_obj:
+                        dest = sys_obj.name
+                label = "Drop Ship" if etype == "drop_ship_arrived" else "Probe"
+                msg = f"{label} arrived: {dest}"
+                col = (255, 200, 80)
+            elif etype == "resource_depleted":
+                res = (ev.get("resource") or "").replace("_", " ").title()
+                msg = f"RESOURCE DEPLETED: {res}"
+                col = (255, 80, 80)
+            else:
+                continue
+            self._notifications.append((msg, now + TTL, col))
+
+    def _draw_notifications(self, surface: pygame.Surface) -> None:
+        if not self._notifications:
+            return
+        from .constants import font as _font, WINDOW_WIDTH
+        from .game_clock import GameClock
+        clock_h = GameClock.CLOCK_H if hasattr(GameClock, "CLOCK_H") else 32
+        now = pygame.time.get_ticks()
+        # Prune expired
+        while self._notifications and self._notifications[0][1] <= now:
+            self._notifications.popleft()
+        x = WINDOW_WIDTH - 10
+        y = clock_h + 8
+        TTL = 6000
+        for msg, expiry, col in reversed(list(self._notifications)):
+            remaining = expiry - now
+            alpha = min(255, int(255 * remaining / max(1, min(TTL, 1500))))
+            pad = 6
+            surf = _font(12, bold=True).render(msg, True, col)
+            w = surf.get_width() + pad * 2
+            h = surf.get_height() + pad * 2
+            bg = pygame.Surface((w, h), pygame.SRCALPHA)
+            bg.fill((10, 10, 30, min(200, alpha)))
+            surface.blit(bg, (x - w, y))
+            surf.set_alpha(alpha)
+            surface.blit(surf, (x - w + pad, y + pad))
+            pygame.draw.rect(surface, (*col, alpha), pygame.Rect(x - w, y, w, h), 1)
+            y += h + 4
+
+    # ------------------------------------------------------------------
     # Main loop
 
     def run(self) -> None:
@@ -311,6 +376,7 @@ class App:
             # Overlay clock + pause menu
             if self.state != "menu":
                 self.game_clock.draw(self.screen)
+                self._draw_notifications(self.screen)
             if self.pause_menu.is_active:
                 self.pause_menu.handle_events(events)
                 self.pause_menu.draw(self.screen)

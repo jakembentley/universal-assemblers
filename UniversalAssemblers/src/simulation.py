@@ -226,6 +226,7 @@ class SimulationEngine:
 
     def _tick_research(self, dt_years: float) -> list:
         """Each Research Array contributes 1 pt/yr distributed across in-progress techs."""
+        from .models.entity import compute_energy_balance
         events: list = []
         roster = self.gs.entity_roster
         array_count = roster.total("structure", "research_array")
@@ -235,7 +236,34 @@ class SimulationEngine:
         in_progress = tech.in_progress_ids()
         if not in_progress:
             return events
-        pts_per_tech = (array_count * dt_years) / len(in_progress)
+
+        # Sum throttle across all bodies that have research arrays
+        galaxy = self.gs.galaxy
+        total_throttled_arrays = 0.0
+        if galaxy:
+            for sys in galaxy.solar_systems:
+                for body in sys.orbital_bodies:
+                    cnt = sum(
+                        i.count for i in roster.at(body.id)
+                        if i.category == "structure" and i.type_value == "research_array"
+                    )
+                    if cnt:
+                        prod, cons = compute_energy_balance(self.gs, body.id)
+                        throttle = min(1.0, prod / max(cons, 1.0))
+                        total_throttled_arrays += cnt * throttle
+                    for moon in body.moons:
+                        cnt = sum(
+                            i.count for i in roster.at(moon.id)
+                            if i.category == "structure" and i.type_value == "research_array"
+                        )
+                        if cnt:
+                            prod, cons = compute_energy_balance(self.gs, moon.id)
+                            throttle = min(1.0, prod / max(cons, 1.0))
+                            total_throttled_arrays += cnt * throttle
+        else:
+            total_throttled_arrays = float(array_count)
+
+        pts_per_tech = (total_throttled_arrays * dt_years) / len(in_progress)
         for tech_id in in_progress:
             completed = tech.add_progress(tech_id, pts_per_tech)
             if completed:
@@ -288,7 +316,7 @@ class SimulationEngine:
 
     def _tick_bot_tasks(self, dt_years: float) -> list:
         """Advance bot task progress; deduct build costs from body resources."""
-        from .models.entity import BUILD_COSTS
+        from .models.entity import BUILD_COSTS, compute_energy_balance
         events: list = []
         gs     = self.gs
         galaxy = gs.galaxy
@@ -310,6 +338,10 @@ class SimulationEngine:
                 continue
             body = body_map.get(loc_id)
 
+            # Power throttle: reduce effective work rate if power is insufficient
+            prod, cons = compute_energy_balance(gs, loc_id)
+            throttle = min(1.0, prod / max(cons, 1.0)) if cons > 0 else 1.0
+
             completed_ids: list[str] = []
             for task in tasks:
                 if task.complete:
@@ -321,7 +353,7 @@ class SimulationEngine:
 
                 if task.task_type == "mine":
                     rate  = _MINE_RATES.get(bot_type, 5.0)
-                    mined = rate * effective_bots * dt_years
+                    mined = rate * effective_bots * throttle * dt_years
                     if body:
                         res       = body.resources  # type: ignore[attr-defined]
                         available = getattr(res, task.resource or "", 0.0)
@@ -334,7 +366,7 @@ class SimulationEngine:
 
                 elif task.task_type == "build":
                     rate           = _BUILD_RATES.get(bot_type, 0.25)
-                    task.progress += rate * effective_bots * dt_years
+                    task.progress += rate * effective_bots * throttle * dt_years
 
                     # Complete whole units while progress >= 1.0
                     cost = BUILD_COSTS.get(task.entity_type or "", {})

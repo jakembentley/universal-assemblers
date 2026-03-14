@@ -374,6 +374,17 @@ class NavPanel:
                     txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
                 if res.energy_output:
                     txt("Energy",    f"{res.energy_output:.2e}", value_col=C_WARN)
+                # Power balance
+                gs = self.app.game_state
+                if gs:
+                    from ..models.entity import compute_energy_balance
+                    prod, cons = compute_energy_balance(gs, body.id)
+                    if prod > 0 or cons > 0:
+                        surplus = prod - cons
+                        pcol = (80, 220, 100) if surplus >= 0 else (255, 80, 80)
+                        txt("Power",
+                            f"+{prod:,.0f} / -{cons:,.0f}  ({surplus:+.0f})",
+                            value_col=pcol)
                 # Bio population
                 gs = self.app.game_state
                 if gs:

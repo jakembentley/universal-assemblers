@@ -102,8 +102,16 @@ class MapPanel:
         # Orbital structure square click
         if hit_id.endswith("_orbital_struct"):
             system = self.app.selected_system
-            if system:
-                self.app.open_entity_view("structure", "extractor", system.id, None)
+            gs = self.app.game_state
+            if system and gs:
+                structs = [
+                    i for i in gs.entity_roster.at(system.id)
+                    if i.category == "structure"
+                ]
+                if structs:
+                    # Open view for the structure type with the highest count
+                    best = max(structs, key=lambda i: i.count)
+                    self.app.open_entity_view("structure", best.type_value, system.id, None)
             return
 
         now = time.time()

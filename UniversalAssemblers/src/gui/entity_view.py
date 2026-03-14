@@ -89,13 +89,30 @@ _BOT_ALLOWED_TASKS: dict[str, list[str]] = {
     "worker":      ["mine", "build"],
 }
 
-# Buildable entity types for constructor tasks
-_BUILD_STRUCTURES = [
+# Buildable entity types for constructor tasks (no tech requirement)
+_BUILD_STRUCTURES_BASE = [
     "extractor", "factory", "research_array",
-    "power_plant_solar", "power_plant_wind", "power_plant_fossil",
-    "power_plant_nuclear", "shipyard", "storage_hub",
+    "power_plant_solar", "power_plant_wind", "power_plant_bios",
+    "power_plant_fossil", "power_plant_nuclear", "shipyard", "storage_hub",
 ]
 _BUILD_BOTS = ["miner", "constructor", "worker", "harvester"]
+
+
+def _get_buildable_structures(gs) -> list[str]:
+    """Return structures buildable given current tech state."""
+    from ..models.entity import POWER_PLANT_SPECS, StructureType
+    researched = gs.tech.researched if gs else set()
+    result = list(_BUILD_STRUCTURES_BASE)
+    # Add tech-gated structures whose prerequisite is now researched
+    gated = {
+        "power_plant_cold_fusion": "cold_fusion",
+        "power_plant_dark_matter": "dark_matter",
+        "replicator": "self_replication",
+    }
+    for st, tech_id in gated.items():
+        if tech_id in researched:
+            result.append(st)
+    return result
 
 
 class EntityView:
@@ -124,6 +141,7 @@ class EntityView:
         self._add_task_type:   str        = "mine"  # "mine" | "build"
         self._add_task_res:    str        = "minerals"
         self._add_task_amount: int        = 100
+        self._bot_scroll:      int        = 0
         # Hit rects populated each draw: (rect, action, data)
         self._hit_rects: list[tuple[pygame.Rect, str, object]] = []
 
@@ -157,6 +175,7 @@ class EntityView:
         self._system_id   = system_id
         self._body_id     = body_id
         self._add_task_mode = False
+        self._bot_scroll    = 0
         # Default task type based on bot capabilities
         allowed = _BOT_ALLOWED_TASKS.get(type_value, ["mine"])
         self._add_task_type = allowed[0]
@@ -262,6 +281,15 @@ class EntityView:
             self._close_btn.handle_event(event)
 
             if self._category == "bot":
+                if (event.type == pygame.MOUSEWHEEL
+                        and self._rect.collidepoint(pygame.mouse.get_pos())):
+                    gs = self.app.game_state
+                    loc = self._body_id or self._system_id or ""
+                    task_count = len(gs.bot_tasks.get(loc, self._type_value)) if gs else 0
+                    visible = max(1, (self._rect.height - 150) // 46)
+                    max_scroll = max(0, task_count - visible)
+                    self._bot_scroll = max(0, min(max_scroll,
+                                                  self._bot_scroll - event.y))
                 self._handle_bot_events(event)
             elif self._category == "ship":
                 self._sys_list.handle_event(event)
@@ -505,9 +533,25 @@ class EntityView:
             surface.blit(th, (cx, cy + 3))
             cy += 18
 
-            for task in tasks:
-                if cy + 42 > self._rect.bottom - 80:
-                    break
+            visible_tasks = max(1, (self._rect.bottom - cy - 90) // 46)
+            total_tasks = len(tasks)
+            max_scroll = max(0, total_tasks - visible_tasks)
+            self._bot_scroll = max(0, min(max_scroll, self._bot_scroll))
+            visible = tasks[self._bot_scroll: self._bot_scroll + visible_tasks]
+
+            # Scrollbar
+            if total_tasks > visible_tasks:
+                sb_x = self._rect.right - PADDING - 4
+                sb_h = visible_tasks * 46
+                sb_y = cy
+                thumb_h = max(16, int(sb_h * visible_tasks / total_tasks))
+                thumb_y = sb_y + int((sb_h - thumb_h) * self._bot_scroll / max_scroll)
+                pygame.draw.rect(surface, (30, 50, 80),
+                                 pygame.Rect(sb_x, sb_y, 4, sb_h), border_radius=2)
+                pygame.draw.rect(surface, (80, 120, 180),
+                                 pygame.Rect(sb_x, thumb_y, 4, thumb_h), border_radius=2)
+
+            for task in visible:
                 task_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 40)
                 pygame.draw.rect(surface, (18, 30, 60), task_r, border_radius=3)
                 pygame.draw.rect(surface, C_BORDER, task_r, width=1, border_radius=3)
@@ -633,7 +677,8 @@ class EntityView:
             fy += ((len(_MINE_RESOURCES) - 1) // 3 + 1) * 26 + 4
         else:
             # Show structures then bots in a grid
-            buildables = _BUILD_STRUCTURES + _BUILD_BOTS
+            gs = self.app.game_state
+            buildables = _get_buildable_structures(gs) + _BUILD_BOTS
             for i, etype in enumerate(buildables):
                 er = pygame.Rect(fx + (i % 3) * 95, fy + (i // 3) * 26, 88, 22)
                 sel = self._add_task_res == etype

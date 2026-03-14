@@ -203,6 +203,45 @@ BUILD_COSTS: dict[str, dict[str, float]] = {
 
 
 # ---------------------------------------------------------------------------
+# Energy consumption
+# ---------------------------------------------------------------------------
+# Maps entity type_value → energy-units/yr consumed per unit
+
+ENERGY_CONSUMPTION: dict[str, float] = {
+    "extractor":               20.0,
+    "factory":                 25.0,
+    "research_array":          30.0,
+    "shipyard":                40.0,
+    "storage_hub":             10.0,
+    "replicator":              60.0,
+    "miner":                    5.0,
+    "constructor":              5.0,
+    "worker":                   3.0,
+    "harvester":                4.0,
+}
+
+
+def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
+    """Return (production, consumption) energy-units/yr for a body."""
+    roster = gs.entity_roster
+    production = 0.0
+    consumption = 0.0
+    for inst in roster.at(body_id):
+        if inst.category == "structure":
+            try:
+                st = StructureType(inst.type_value)
+                if st in POWER_PLANT_SPECS:
+                    production += POWER_PLANT_SPECS[st].base_output * inst.count
+            except ValueError:
+                pass
+            cons = ENERGY_CONSUMPTION.get(inst.type_value, 0.0)
+            consumption += cons * inst.count
+        elif inst.category == "bot":
+            consumption += ENERGY_CONSUMPTION.get(inst.type_value, 0.0) * inst.count
+    return production, consumption
+
+
+# ---------------------------------------------------------------------------
 # Starting entity manifest
 # ---------------------------------------------------------------------------
 # (category, type_value, location, count)
