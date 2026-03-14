@@ -309,14 +309,16 @@ class SimulationEngine:
                 })
 
             elif ship_type == "probe":
+                dest_sys = order.target_system_id or loc_id
                 roster.remove("ship", "probe", loc_id, 1)
+                roster.add("ship", "probe", dest_sys, 1)   # probe stays at destination
                 if order.target_system_id:
                     self.gs.discover_system(order.target_system_id)
                     self.gs.probed_systems.add(order.target_system_id)
-                    events.append({
-                        "type": "probe_arrived",
-                        "system_id": order.target_system_id,
-                    })
+                events.append({
+                    "type": "probe_arrived",
+                    "system_id": dest_sys,
+                })
 
             else:
                 # All other ship types: move to destination, stay in roster

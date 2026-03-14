@@ -73,12 +73,24 @@ class EntitiesPanel:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for rect, category, type_val in self._hit_rects:
                     if rect.collidepoint(event.pos):
-                        sys   = self.app.selected_system
-                        sys_id  = sys.id if sys else None
+                        sys    = self.app.selected_system
+                        sys_id = sys.id if sys else None
                         body_id = self.app.selected_body_id
-                        # Ships live at system level; structures/bots at body level
                         if category == "ship":
                             body_id = None
+                            # Open entity view at the system where ships actually are.
+                            # Prefer the currently selected system; fall back to the
+                            # first system that has at least one of this ship type.
+                            gs = self.app.game_state
+                            if gs:
+                                if not any(
+                                    i.type_value == type_val and i.category == "ship"
+                                    for i in gs.entity_roster.at(sys_id or "")
+                                ):
+                                    for inst in gs.entity_roster.by_category("ship"):
+                                        if inst.type_value == type_val:
+                                            sys_id = inst.location_id
+                                            break
                         self.app.open_entity_view(category, type_val, sys_id, body_id)
                         return
 
@@ -89,6 +101,10 @@ class EntitiesPanel:
             if self.app.game_state else None
         )
 
+        sys     = self.app.selected_system
+        sys_id  = sys.id if sys else None
+        body_id = self.app.selected_body_id
+
         self._hit_rects = []
         mouse_pos = pygame.mouse.get_pos()
         col_w = content.width // len(_COLUMNS)
@@ -98,14 +114,26 @@ class EntitiesPanel:
             cx = content.x + ci * col_w
             cy = content.y
 
-            # Column total
+            # Column total (global) and at-location count
             col_total = (
                 sum(roster.total(category, tv) for tv, _, _ in types)
                 if roster else 0
             )
-            header = font(12, bold=True).render(
-                f"{title.upper()}  ({col_total})", True, accent
+            # Location used for "here" count
+            if category == "ship":
+                here_loc = sys_id
+            else:
+                here_loc = body_id or sys_id
+            col_here = (
+                sum(
+                    sum(i.count for i in roster.at(here_loc or "")
+                        if i.category == category and i.type_value == tv)
+                    for tv, _, _ in types
+                )
+                if roster and here_loc else 0
             )
+            header_txt = f"{title.upper()}  ({col_here} here / {col_total} total)"
+            header = font(11, bold=True).render(header_txt, True, accent)
             surface.blit(header, (cx + PADDING, cy + 4))
 
             draw_separator(surface, cx + PADDING, cy + 22, cx + col_w - PADDING)
@@ -118,20 +146,32 @@ class EntitiesPanel:
                 if row_y + row_h > content.bottom:
                     break
 
-                count = roster.total(category, type_val) if roster else 0
+                # "here" count at current location; global total for dim/bright logic
+                here_count = (
+                    sum(i.count for i in roster.at(here_loc or "")
+                        if i.category == category and i.type_value == type_val)
+                    if roster and here_loc else 0
+                )
+                total_count = roster.total(category, type_val) if roster else 0
 
                 row_rect = pygame.Rect(cx + 1, row_y, col_w - 2, row_h)
                 self._hit_rects.append((row_rect, category, type_val))
 
-                # Hover highlight
-                if row_rect.collidepoint(mouse_pos):
+                if row_rect.collidepoint(mouse_pos) and total_count > 0:
                     pygame.draw.rect(surface, C_HOVER, row_rect, border_radius=2)
 
-                icon_surf  = font(12).render(icon, True, accent)
-                name_surf  = font(12).render(name, True, C_TEXT_DIM if count == 0 else C_TEXT)
-                count_surf = font(12, bold=True).render(
-                    str(count), True, C_SELECTED if count > 0 else C_TEXT_DIM
+                icon_surf = font(12).render(icon, True, accent)
+                name_surf = font(12).render(
+                    name, True, C_TEXT_DIM if total_count == 0 else C_TEXT
                 )
+                # Show "here / total" when they differ; otherwise just the here count
+                if total_count > here_count and total_count > 0:
+                    count_txt = f"{here_count}/{total_count}"
+                    count_col = C_TEXT_DIM if here_count == 0 else C_SELECTED
+                else:
+                    count_txt = str(here_count)
+                    count_col = C_SELECTED if here_count > 0 else C_TEXT_DIM
+                count_surf = font(11, bold=True).render(count_txt, True, count_col)
 
                 surface.blit(icon_surf,  (cx + PADDING, row_y))
                 surface.blit(name_surf,  (cx + PADDING + 16, row_y))
