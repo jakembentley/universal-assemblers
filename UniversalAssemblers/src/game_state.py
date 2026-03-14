@@ -279,6 +279,10 @@ class GameState:
         self.sim_engine: SimulationEngine = SimulationEngine(self)
         self._sim_events: list = []   # most-recent tick's events, for UI polling
         self.probed_systems: set[str] = set()   # systems a probe has visited
+        # power_plant_active: key = f"{body_id}:{type_value}", default True
+        self.power_plant_active: dict[str, bool] = {}
+        # extractor_refine_mode: key = body_id, default False
+        self.extractor_refine_mode: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # Factory
@@ -432,11 +436,13 @@ class GameState:
 
     def to_dict(self) -> dict:
         return {
-            "version": 1,
-            "discovery_states": {k: v.value for k, v in self._states.items()},
-            "probed_systems":   list(self.probed_systems),
-            "entity_roster":    self.entity_roster.to_dict(),
-            "tech":             self.tech.to_dict(),
+            "version": 2,
+            "discovery_states":     {k: v.value for k, v in self._states.items()},
+            "probed_systems":       list(self.probed_systems),
+            "entity_roster":        self.entity_roster.to_dict(),
+            "tech":                 self.tech.to_dict(),
+            "power_plant_active":   dict(self.power_plant_active),
+            "extractor_refine_mode": dict(self.extractor_refine_mode),
         }
 
     @classmethod
@@ -448,9 +454,11 @@ class GameState:
         for sys_id, state_val in d.get("discovery_states", {}).items():
             gs._states[sys_id] = DiscoveryState(state_val)
 
-        gs.probed_systems  = set(d.get("probed_systems", []))
-        gs.entity_roster   = EntityRoster.from_dict(d.get("entity_roster", {}))
-        gs.tech            = TechState.from_dict(d.get("tech", {}))
+        gs.probed_systems        = set(d.get("probed_systems", []))
+        gs.entity_roster         = EntityRoster.from_dict(d.get("entity_roster", {}))
+        gs.tech                  = TechState.from_dict(d.get("tech", {}))
+        gs.power_plant_active    = dict(d.get("power_plant_active", {}))
+        gs.extractor_refine_mode = dict(d.get("extractor_refine_mode", {}))
 
         gs._init_bio_state()
 

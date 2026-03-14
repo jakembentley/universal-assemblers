@@ -272,13 +272,19 @@ class App:
                 ent = (ev.get("entity_type") or "").replace("_", " ").title()
                 msg = f"BUILT: {ent}"
                 col = (80, 200, 255)
-            elif etype in ("drop_ship_arrived", "probe_arrived"):
+            elif etype in ("drop_ship_arrived", "probe_arrived", "ship_arrived"):
                 dest = ev.get("destination") or ev.get("system_id") or "?"
                 if self.galaxy:
                     sys_obj = next((s for s in self.galaxy.solar_systems if s.id == dest), None)
                     if sys_obj:
                         dest = sys_obj.name
-                label = "Drop Ship" if etype == "drop_ship_arrived" else "Probe"
+                if etype == "drop_ship_arrived":
+                    label = "Drop Ship"
+                elif etype == "probe_arrived":
+                    label = "Probe"
+                else:
+                    label = (ev.get("ship_type") or "Ship").replace("_", " ").title()
+                label = label  # keep for f-string below
                 msg = f"{label} arrived: {dest}"
                 col = (255, 200, 80)
             elif etype == "resource_depleted":

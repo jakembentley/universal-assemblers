@@ -96,6 +96,7 @@ _BUILD_STRUCTURES_BASE = [
     "power_plant_fossil", "power_plant_nuclear", "shipyard", "storage_hub",
 ]
 _BUILD_BOTS = ["miner", "constructor", "worker", "harvester"]
+_BUILD_SHIPS = ["probe", "drop_ship"]
 
 
 def _get_buildable_structures(gs) -> list[str]:
@@ -141,7 +142,9 @@ class EntityView:
         self._add_task_type:   str        = "mine"  # "mine" | "build"
         self._add_task_res:    str        = "minerals"
         self._add_task_amount: int        = 100
-        self._bot_scroll:      int        = 0
+        self._bot_scroll:    int = 0
+        self._struct_scroll: int = 0
+        self._ship_scroll:   int = 0
         # Hit rects populated each draw: (rect, action, data)
         self._hit_rects: list[tuple[pygame.Rect, str, object]] = []
 
@@ -174,8 +177,10 @@ class EntityView:
         self._type_value  = type_value
         self._system_id   = system_id
         self._body_id     = body_id
-        self._add_task_mode = False
-        self._bot_scroll    = 0
+        self._add_task_mode  = False
+        self._bot_scroll     = 0
+        self._struct_scroll  = 0
+        self._ship_scroll    = 0
         # Default task type based on bot capabilities
         allowed = _BOT_ALLOWED_TASKS.get(type_value, ["mine"])
         self._add_task_type = allowed[0]
@@ -280,20 +285,43 @@ class EntityView:
         for event in events:
             self._close_btn.handle_event(event)
 
-            if self._category == "bot":
-                if (event.type == pygame.MOUSEWHEEL
-                        and self._rect.collidepoint(pygame.mouse.get_pos())):
+            if event.type == pygame.MOUSEWHEEL and self._rect.collidepoint(pygame.mouse.get_pos()):
+                if self._category == "bot":
                     gs = self.app.game_state
                     loc = self._body_id or self._system_id or ""
                     task_count = len(gs.bot_tasks.get(loc, self._type_value)) if gs else 0
                     visible = max(1, (self._rect.height - 150) // 46)
                     max_scroll = max(0, task_count - visible)
-                    self._bot_scroll = max(0, min(max_scroll,
-                                                  self._bot_scroll - event.y))
+                    self._bot_scroll = max(0, min(max_scroll, self._bot_scroll - event.y))
+                elif self._category == "structure":
+                    self._struct_scroll = max(0, self._struct_scroll - event.y * ROW_H)
+                elif self._category == "ship":
+                    self._ship_scroll = max(0, self._ship_scroll - event.y * ROW_H)
+
+            if self._category == "bot":
                 self._handle_bot_events(event)
+            elif self._category == "structure":
+                self._handle_structure_events(event)
             elif self._category == "ship":
                 self._sys_list.handle_event(event)
                 self._handle_ship_events(event)
+
+    def _handle_structure_events(self, event: pygame.event.Event) -> None:
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        pos = event.pos
+        gs = self.app.game_state
+        if not gs:
+            return
+        for rect, action, data in self._hit_rects:
+            if rect.collidepoint(pos):
+                if action == "toggle_power_plant":
+                    key = f"{self._body_id or self._system_id}:{self._type_value}"
+                    gs.power_plant_active[key] = not gs.power_plant_active.get(key, True)
+                elif action == "toggle_refine":
+                    loc = self._body_id or self._system_id or ""
+                    gs.extractor_refine_mode[loc] = not gs.extractor_refine_mode.get(loc, False)
+                return
 
     def _handle_bot_events(self, event: pygame.event.Event) -> None:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -451,17 +479,23 @@ class EntityView:
     # ------------------------------------------------------------------
     # Structure panel
 
-    def _draw_structure(self, surface: pygame.Surface, cx: int, cy: int) -> int:
-        from ..models.entity import POWER_PLANT_SPECS, StructureType
+    def _draw_structure(self, surface: pygame.Surface, cx: int, cy_in: int) -> int:
+        from ..models.entity import POWER_PLANT_SPECS, StructureType, REFINE_RECIPES
+
+        # Apply scroll via clip offset
+        content_top = cy_in
+        cy = cy_in - self._struct_scroll
 
         def txt(label: str, value: str, vcol=C_TEXT) -> None:
             nonlocal cy
-            l = font(12).render(label, True, C_TEXT_DIM)
-            v = font(12, bold=True).render(value, True, vcol)
-            surface.blit(l, (cx, cy))
-            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
+            if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                l = font(12).render(label, True, C_TEXT_DIM)
+                v = font(12, bold=True).render(value, True, vcol)
+                surface.blit(l, (cx, cy))
+                surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
             cy += ROW_H
 
+        gs = self.app.game_state
         loc = self._body_id or self._system_id
         txt("Location", loc or "—", C_TEXT_DIM)
 
@@ -472,34 +506,104 @@ class EntityView:
             st = None
         if st and st in POWER_PLANT_SPECS:
             spec = POWER_PLANT_SPECS[st]
-            cy += 8
-            sep_y = cy
-            draw_separator(surface, cx, sep_y, self._rect.right - PADDING * 2)
-            lbl = font(11, bold=True).render("POWER PLANT", True, C_ACCENT)
-            surface.blit(lbl, (cx, sep_y + 3))
+            # Active / Inactive toggle
+            flag_key = f"{loc}:{self._type_value}"
+            is_active = gs.power_plant_active.get(flag_key, True) if gs else True
+            cy += 4
+            if cy >= content_top - 30 and cy < self._rect.bottom:
+                tog_r = pygame.Rect(cx, cy, 110, 24)
+                tog_col = (0, 120, 60) if is_active else (80, 30, 30)
+                pygame.draw.rect(surface, tog_col, tog_r, border_radius=4)
+                tog_lbl = font(11, bold=True).render(
+                    "● ACTIVE" if is_active else "○ INACTIVE", True,
+                    (100, 255, 140) if is_active else (200, 80, 80)
+                )
+                surface.blit(tog_lbl, tog_lbl.get_rect(center=tog_r.center))
+                self._hit_rects.append((tog_r, "toggle_power_plant", None))
+            cy += 30
+            cy += 4
+            if cy >= content_top - 18 and cy < self._rect.bottom:
+                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                lbl = font(11, bold=True).render("POWER PLANT", True, C_ACCENT)
+                surface.blit(lbl, (cx, cy + 3))
             cy += 18
-            txt("Output (per unit/yr)", f"{spec.base_output:,.0f}", C_WARN)
+            count = self._count_at_location()
+            txt("Total output/yr", f"{spec.base_output * count:,.0f}" if is_active else "0 (inactive)", C_WARN)
+            txt("Per unit/yr", f"{spec.base_output:,.0f}", C_TEXT_DIM)
             txt("Renewable", "Yes" if spec.renewable else "No",
                 (80, 200, 100) if spec.renewable else C_WARN)
             if spec.input_resource:
                 txt("Consumes", spec.input_resource.replace("_", " ").title(), C_WARN)
                 txt("Rate (per unit/yr)", f"{spec.input_rate:.1f}")
 
+        # Extractor refine mode toggle
+        if self._type_value == "extractor":
+            cy += 4
+            refine_on = gs.extractor_refine_mode.get(loc or "", False) if gs else False
+            if cy >= content_top - 30 and cy < self._rect.bottom:
+                ref_r = pygame.Rect(cx, cy, 140, 24)
+                ref_col = (20, 80, 120) if refine_on else (40, 40, 60)
+                pygame.draw.rect(surface, ref_col, ref_r, border_radius=4)
+                ref_lbl = font(11, bold=True).render(
+                    "⚗ REFINE: ON" if refine_on else "⚗ REFINE: OFF",
+                    True, (100, 200, 255) if refine_on else C_TEXT_DIM
+                )
+                surface.blit(ref_lbl, ref_lbl.get_rect(center=ref_r.center))
+                self._hit_rects.append((ref_r, "toggle_refine", None))
+            cy += 30
+            if refine_on:
+                cy += 4
+                if cy >= content_top - 18 and cy < self._rect.bottom:
+                    draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                    lbl = font(11, bold=True).render("REFINE RECIPES (active)", True, C_ACCENT)
+                    surface.blit(lbl, (cx, cy + 3))
+                cy += 18
+                for out_res, (costs, rate) in REFINE_RECIPES.items():
+                    cost_str = " + ".join(f"{v:.0f} {k.replace('_',' ')}" for k, v in costs.items())
+                    txt(f"→ {out_res.replace('_',' ').title()}/extractor/yr",
+                        f"{rate:.0f}  (costs: {cost_str})", (100, 220, 255))
+
         # Research Array note
         if self._type_value == "research_array":
-            cy += 8
-            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-            lbl = font(11, bold=True).render("RESEARCH", True, C_ACCENT)
-            surface.blit(lbl, (cx, cy + 3))
+            cy += 4
+            if cy >= content_top - 18 and cy < self._rect.bottom:
+                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                lbl = font(11, bold=True).render("RESEARCH", True, C_ACCENT)
+                surface.blit(lbl, (cx, cy + 3))
             cy += 18
-            note = font(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
-            surface.blit(note, (cx, cy))
+            if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                note = font(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
+                surface.blit(note, (cx, cy))
             cy += ROW_H
-            note2 = font(12).render("Use the TECH TREE button above to assign research.", True, C_TEXT_DIM)
-            surface.blit(note2, (cx, cy))
+            if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                note2 = font(12).render("Use the TECH TREE button above to assign research.", True, C_TEXT_DIM)
+                surface.blit(note2, (cx, cy))
             cy += ROW_H
 
-        return cy
+        # Incoming build queue for this structure type
+        if gs:
+            queue_tasks = []
+            for (loc_id, bot_type) in gs.bot_tasks.all_keys():
+                for t in gs.bot_tasks.get(loc_id, bot_type):
+                    if t.task_type == "build" and t.entity_type == self._type_value:
+                        queue_tasks.append(t)
+            if queue_tasks:
+                cy += 4
+                if cy >= content_top - 18 and cy < self._rect.bottom:
+                    draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                    q_lbl = font(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
+                    surface.blit(q_lbl, (cx, cy + 3))
+                cy += 18
+                for qt in queue_tasks:
+                    txt("Queued", f"{qt.built_count}/{qt.target_amount}  ({qt.allocation}% alloc)",
+                        (80, 200, 100))
+
+        # Clamp scroll to content
+        content_h = cy + self._struct_scroll - content_top
+        max_scroll = max(0, content_h - (self._rect.bottom - content_top - 10))
+        self._struct_scroll = min(self._struct_scroll, max_scroll)
+
+        return cy_in + max(0, cy - cy_in + self._struct_scroll)
 
     # ------------------------------------------------------------------
     # Bot panel
@@ -678,7 +782,7 @@ class EntityView:
         else:
             # Show structures then bots in a grid
             gs = self.app.game_state
-            buildables = _get_buildable_structures(gs) + _BUILD_BOTS
+            buildables = _get_buildable_structures(gs) + _BUILD_BOTS + _BUILD_SHIPS
             for i, etype in enumerate(buildables):
                 er = pygame.Rect(fx + (i % 3) * 95, fy + (i // 3) * 26, 88, 22)
                 sel = self._add_task_res == etype
@@ -731,19 +835,22 @@ class EntityView:
     # ------------------------------------------------------------------
     # Ship panel
 
-    def _draw_ship(self, surface: pygame.Surface, cx: int, cy: int) -> int:
+    def _draw_ship(self, surface: pygame.Surface, cx: int, cy_in: int) -> int:
         gs = self.app.game_state
         if not gs:
-            return cy
+            return cy_in
 
         loc = self._system_id or ""
+        content_top = cy_in
+        cy = cy_in - self._ship_scroll
 
         def txt(label: str, value: str, vcol=C_TEXT) -> None:
             nonlocal cy
-            l = font(12).render(label, True, C_TEXT_DIM)
-            v = font(12, bold=True).render(value, True, vcol)
-            surface.blit(l, (cx, cy))
-            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
+            if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                l = font(12).render(label, True, C_TEXT_DIM)
+                v = font(12, bold=True).render(value, True, vcol)
+                surface.blit(l, (cx, cy))
+                surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
             cy += ROW_H
 
         count = self._count_at_location()
@@ -824,6 +931,11 @@ class EntityView:
                     surface.blit(disp_lbl, disp_lbl.get_rect(center=disp_btn_r.center))
                     self._hit_rects.append((disp_btn_r, "dispatch_ship", None))
                     cy += 36
+
+        # Clamp ship scroll
+        content_h = cy + self._ship_scroll - content_top
+        max_scroll = max(0, content_h - (self._rect.bottom - content_top - 10))
+        self._ship_scroll = min(self._ship_scroll, max_scroll)
 
         return cy
 

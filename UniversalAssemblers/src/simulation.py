@@ -155,6 +155,11 @@ _BUILD_RATES: dict[str, float] = {
     "worker":      0.5,
 }
 
+# Ship type_values that constructors can build
+_SHIP_TYPES: frozenset[str] = frozenset({
+    "probe", "drop_ship", "mining_vessel", "transport", "warship",
+})
+
 # All structure type_values that constructors can place
 _STRUCTURE_TYPES: frozenset[str] = frozenset({
     "extractor", "factory", "research_array", "shipyard", "storage_hub",
@@ -178,6 +183,7 @@ class SimulationEngine:
         events.extend(self._tick_research(dt_years))
         events.extend(self._tick_ships(dt_years))
         events.extend(self._tick_bot_tasks(dt_years))
+        self._tick_extractors(dt_years)
         return events
 
     # ------------------------------------------------------------------
@@ -312,7 +318,58 @@ class SimulationEngine:
                         "system_id": order.target_system_id,
                     })
 
+            else:
+                # All other ship types: move to destination, stay in roster
+                dest_sys = order.target_system_id or loc_id
+                roster.remove("ship", ship_type, loc_id, 1)
+                roster.add("ship", ship_type, dest_sys, 1)
+                if order.target_system_id:
+                    self.gs.discover_system(order.target_system_id)
+                    self.gs.probed_systems.add(order.target_system_id)
+                events.append({
+                    "type": "ship_arrived",
+                    "ship_type": ship_type,
+                    "destination": dest_sys,
+                    "source": loc_id,
+                })
+
         return events
+
+    def _tick_extractors(self, dt_years: float) -> None:
+        """Refine base resources into manufactured goods when extractor refine mode is on."""
+        from .models.entity import REFINE_RECIPES
+        gs     = self.gs
+        galaxy = gs.galaxy
+        if not galaxy:
+            return
+        roster = gs.entity_roster
+
+        body_map: dict[str, object] = {}
+        for sys in galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                body_map[body.id] = body
+                for moon in body.moons:
+                    body_map[moon.id] = moon
+
+        for inst in roster.by_category("structure"):
+            if inst.type_value != "extractor":
+                continue
+            if not gs.extractor_refine_mode.get(inst.location_id, False):
+                continue
+            body = body_map.get(inst.location_id)
+            if not body:
+                continue
+            res = body.resources  # type: ignore[attr-defined]
+            for out_res, (costs, rate_per_extractor) in REFINE_RECIPES.items():
+                output_amount = rate_per_extractor * inst.count * dt_years
+                # Check and consume inputs
+                if not all(getattr(res, r, 0.0) >= amt * output_amount / rate_per_extractor
+                           for r, amt in costs.items()):
+                    continue
+                for r, amt in costs.items():
+                    consumed = amt * output_amount / rate_per_extractor
+                    setattr(res, r, max(0.0, getattr(res, r, 0.0) - consumed))
+                setattr(res, out_res, getattr(res, out_res, 0.0) + output_amount)
 
     def _tick_bot_tasks(self, dt_years: float) -> list:
         """Advance bot task progress; deduct build costs from body resources."""
@@ -323,13 +380,16 @@ class SimulationEngine:
         if not galaxy:
             return events
 
-        # Build body_id → body lookup
+        # Build body_id → body lookup + body_id → system_id reverse map
         body_map: dict[str, object] = {}
+        body_to_system: dict[str, str] = {}
         for sys in galaxy.solar_systems:
             for body in sys.orbital_bodies:
                 body_map[body.id] = body
+                body_to_system[body.id] = sys.id
                 for moon in body.moons:
                     body_map[moon.id] = moon
+                    body_to_system[moon.id] = sys.id
 
         for loc_id, bot_type in list(gs.bot_tasks.all_keys()):
             tasks     = gs.bot_tasks.get(loc_id, bot_type)
@@ -385,12 +445,22 @@ class SimulationEngine:
 
                         task.progress    -= 1.0
                         task.built_count += 1
-                        cat = "structure" if task.entity_type in _STRUCTURE_TYPES else "bot"
-                        gs.entity_roster.add(cat, task.entity_type or "", loc_id, 1)
+                        etype = task.entity_type or ""
+                        if etype in _STRUCTURE_TYPES:
+                            cat = "structure"
+                            add_loc = loc_id
+                        elif etype in _SHIP_TYPES:
+                            cat = "ship"
+                            # Ships land at system level, not body level
+                            add_loc = body_to_system.get(loc_id, loc_id)
+                        else:
+                            cat = "bot"
+                            add_loc = loc_id
+                        gs.entity_roster.add(cat, etype, add_loc, 1)
                         events.append({
                             "type":        "entity_built",
-                            "entity_type": task.entity_type,
-                            "location":    loc_id,
+                            "entity_type": etype,
+                            "location":    add_loc,
                         })
 
                 if task.complete:

@@ -332,6 +332,13 @@ class NavPanel:
                 txt("Gas",           f"{res.gas:,.1f}")
                 if res.bios:
                     txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
+                _mfg = (180, 220, 255)
+                if res.electronics > 0:
+                    txt("Electronics", f"{res.electronics:,.1f}", value_col=_mfg)
+                if res.alloys > 0:
+                    txt("Alloys",      f"{res.alloys:,.1f}",      value_col=_mfg)
+                if res.fuel_cells > 0:
+                    txt("Fuel Cells",  f"{res.fuel_cells:,.1f}",  value_col=_mfg)
                 # Bio population
                 gs = self.app.game_state
                 if gs:
@@ -374,6 +381,14 @@ class NavPanel:
                     txt("Bios",      f"{res.bios:,.1f}", value_col=(80, 200, 100))
                 if res.energy_output:
                     txt("Energy",    f"{res.energy_output:.2e}", value_col=C_WARN)
+                # Manufactured resources
+                _mfg_col = (180, 220, 255)
+                if res.electronics > 0:
+                    txt("Electronics", f"{res.electronics:,.1f}", value_col=_mfg_col)
+                if res.alloys > 0:
+                    txt("Alloys",      f"{res.alloys:,.1f}",      value_col=_mfg_col)
+                if res.fuel_cells > 0:
+                    txt("Fuel Cells",  f"{res.fuel_cells:,.1f}",  value_col=_mfg_col)
                 # Power balance
                 gs = self.app.game_state
                 if gs:

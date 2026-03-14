@@ -19,6 +19,10 @@ class Resource:
     gas: float = 0.0
     bios: float = 0.0        # biological feedstock; renewable on suitable bodies
     energy_output: float = 0.0
+    # Manufactured resources (produced by extractors in refine mode)
+    electronics: float = 0.0  # from minerals + rare_minerals
+    alloys: float = 0.0        # from minerals
+    fuel_cells: float = 0.0    # from gas + ice
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -32,4 +36,7 @@ class Resource:
             gas=d.get("gas", 0.0),
             bios=d.get("bios", 0.0),
             energy_output=d.get("energy_output", 0.0),
+            electronics=d.get("electronics", 0.0),
+            alloys=d.get("alloys", 0.0),
+            fuel_cells=d.get("fuel_cells", 0.0),
         )

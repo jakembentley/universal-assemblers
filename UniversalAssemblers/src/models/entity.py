@@ -194,6 +194,9 @@ BUILD_COSTS: dict[str, dict[str, float]] = {
     "shipyard":                {"minerals": 200, "rare_minerals": 50},
     "storage_hub":             {"minerals": 60,  "rare_minerals": 10},
     "replicator":              {"minerals": 300, "rare_minerals": 100},
+    # Ships
+    "probe":                   {"minerals": 40,  "rare_minerals": 15},
+    "drop_ship":               {"minerals": 80,  "rare_minerals": 20},
     # Bots
     "miner":                   {"minerals": 20,  "rare_minerals": 5},
     "constructor":             {"minerals": 20,  "rare_minerals": 5},
@@ -231,7 +234,9 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
             try:
                 st = StructureType(inst.type_value)
                 if st in POWER_PLANT_SPECS:
-                    production += POWER_PLANT_SPECS[st].base_output * inst.count
+                    flag_key = f"{body_id}:{inst.type_value}"
+                    if gs.power_plant_active.get(flag_key, True):
+                        production += POWER_PLANT_SPECS[st].base_output * inst.count
             except ValueError:
                 pass
             cons = ENERGY_CONSUMPTION.get(inst.type_value, 0.0)
@@ -239,6 +244,18 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
         elif inst.category == "bot":
             consumption += ENERGY_CONSUMPTION.get(inst.type_value, 0.0) * inst.count
     return production, consumption
+
+
+# ---------------------------------------------------------------------------
+# Manufactured resource refine recipes
+# ---------------------------------------------------------------------------
+# Maps output_resource → (input_costs_per_unit, output_per_extractor_per_yr)
+
+REFINE_RECIPES: dict[str, tuple[dict[str, float], float]] = {
+    "electronics": ({"minerals": 20.0, "rare_minerals": 10.0}, 5.0),
+    "alloys":      ({"minerals": 30.0},                        8.0),
+    "fuel_cells":  ({"gas": 20.0, "ice": 10.0},               5.0),
+}
 
 
 # ---------------------------------------------------------------------------
