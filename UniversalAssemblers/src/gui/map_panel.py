@@ -191,7 +191,7 @@ class MapPanel:
         t = time.time() * 0.5   # global time, halved for slower orbits
 
         # Scale: fit the 5 AU zone comfortably, compress outer orbits
-        max_r_px = min(MAP_W, TOP_H) * 0.44
+        max_r_px = min(_c.MAP_W, _c.TOP_H) * 0.44
 
         gs = self.app.game_state
         is_probed = gs.is_probed(system.id) if gs else False
@@ -307,7 +307,7 @@ class MapPanel:
         cy = self.rect.centery
         t  = time.time() * 0.5
 
-        max_r_px = min(MAP_W, TOP_H) * 0.38
+        max_r_px = min(_c.MAP_W, _c.TOP_H) * 0.38
 
         # Orbit rings for moons
         for i, moon in enumerate(planet.moons):
