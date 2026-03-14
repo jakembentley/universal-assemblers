@@ -175,7 +175,7 @@ class SimulationEngine:
         events: list = []
         self._tick_bios(dt_years)
         events.extend(self._tick_power_plants(dt_years))
-        self._tick_research(dt_years)
+        events.extend(self._tick_research(dt_years))
         events.extend(self._tick_ships(dt_years))
         events.extend(self._tick_bot_tasks(dt_years))
         return events
@@ -224,19 +224,23 @@ class SimulationEngine:
                     })
         return events
 
-    def _tick_research(self, dt_years: float) -> None:
+    def _tick_research(self, dt_years: float) -> list:
         """Each Research Array contributes 1 pt/yr distributed across in-progress techs."""
+        events: list = []
         roster = self.gs.entity_roster
         array_count = roster.total("structure", "research_array")
         if array_count == 0:
-            return
+            return events
         tech = self.gs.tech
         in_progress = tech.in_progress_ids()
         if not in_progress:
-            return
+            return events
         pts_per_tech = (array_count * dt_years) / len(in_progress)
         for tech_id in in_progress:
-            tech.add_progress(tech_id, pts_per_tech)
+            completed = tech.add_progress(tech_id, pts_per_tech)
+            if completed:
+                events.append({"type": "tech_complete", "tech_id": tech_id})
+        return events
 
     def _tick_ships(self, dt_years: float) -> list:
         """Advance ship travel; convert Drop Ships on arrival; probe systems."""

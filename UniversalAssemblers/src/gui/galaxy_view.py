@@ -55,7 +55,7 @@ class GalaxyView:
         self._screen_pos: dict[str, tuple[int, int]] = {}
 
         # Map rect — computed from current window size
-        self.self.MAP_RECT = pygame.Rect(
+        self.MAP_RECT = pygame.Rect(
             10, TOP_BAR_H + 5,
             _c.WINDOW_WIDTH - 20,
             _c.WINDOW_HEIGHT - TOP_BAR_H - BOTTOM_BAR_H - 10,

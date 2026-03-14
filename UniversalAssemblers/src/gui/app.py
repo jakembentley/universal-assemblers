@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import deque
 
 import pygame
 
@@ -48,6 +49,9 @@ class App:
         self.entity_view    = EntityView(self)
         self.tech_view      = TechView(self)
         self.new_game_panel = NewGamePanel(self)
+
+        # Toast notifications: each entry is (message, expiry_ms, color)
+        self._notifications: deque = deque(maxlen=5)
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -285,6 +289,7 @@ class App:
                     from .game_clock import GameClock
                     dt_years = dt * GameClock.YEAR_PER_MS_AT_1X * self.game_clock.current_speed
                     self.game_state.tick(dt_years)
+                    self._process_sim_events()
 
             # View draw + events (gated behind pause menu)
             if self.state == "menu":
