@@ -1,0 +1,19 @@
+# Ensure shell scripts always use LF line endings (required for bash on all platforms)
+*.sh    text eol=lf
+
+# Python source — LF everywhere
+*.py    text eol=lf
+
+# Batch files keep CRLF (Windows-only)
+*.bat   text eol=crlf
+
+# JSON / TOML / YAML — LF
+*.json  text eol=lf
+*.toml  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+
+# Binary files — no line-ending conversion
+*.exe   binary
+*.pyz   binary
+*.pkg   binary

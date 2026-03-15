@@ -5,10 +5,9 @@
 # if a src/ Python file was modified, then runs scripts/smoke_tests.py and
 # reports pass/fail.  Always exits 0 (PostToolUse hooks cannot block).
 
-REPO="/c/Users/Admin/code"
-PROJECT="UniversalAssemblers"
-PYTHON="/c/Users/Admin/anaconda3/python.exe"
-TESTS="$REPO/$PROJECT/scripts/smoke_tests.py"
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+
+TESTS="$PROJECT_DIR/scripts/smoke_tests.py"
 
 # ── 1. Parse file path from stdin JSON ───────────────────────────────────────
 TOOL_INPUT=$(cat)
@@ -35,7 +34,7 @@ if [ ! -f "$TESTS" ]; then
 fi
 
 # ── 3. Run tests ─────────────────────────────────────────────────────────────
-cd "$REPO/$PROJECT" || exit 0
+cd "$PROJECT_DIR" || exit 0
 
 OUTPUT=$("$PYTHON" "$TESTS" 2>&1)
 CODE=$?

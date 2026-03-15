@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
-# test_and_push.sh
+# test_and_push.sh — Stop hook
 #
-# Called by the Claude Code Stop hook.
-# 1. Checks whether any changes exist under UniversalAssemblers/
-# 2. Runs the Python smoke tests from the project directory
-# 3. Stages only UniversalAssemblers/ source files, commits, and pushes
-#
-# Build (PyInstaller) is NOT run here — it is slow (~1-3 min) and should
-# only be triggered explicitly with `build.bat` when releasing.
-#
-# Never stages build/, dist/, __pycache__, or binary files.
+# 1. Checks whether any changes exist under the project directory
+# 2. Runs Python smoke tests
+# 3. Stages only source files, commits, and pushes
 
-REPO="/c/Users/Admin/code"
-PROJECT="UniversalAssemblers"
-PYTHON="/c/Users/Admin/anaconda3/python.exe"
-TESTS="$REPO/$PROJECT/scripts/smoke_tests.py"
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+
+TESTS="$PROJECT_DIR/scripts/smoke_tests.py"
 
 cd "$REPO" || exit 1
 
-# ── 1. Check for changes scoped to UniversalAssemblers/ ──────────────────────
+# ── 1. Check for changes scoped to the project ───────────────────────────────
 CHANGED=$(
   {
     git diff --name-only HEAD 2>/dev/null
@@ -34,10 +27,10 @@ if [ -z "$CHANGED" ]; then
   exit 0   # nothing to do
 fi
 
-# ── 2. Smoke tests (run from project dir so 'src' is importable) ──────────────
+# ── 2. Smoke tests ────────────────────────────────────────────────────────────
 echo "[hook] Changes detected in ${PROJECT}/ — running smoke tests..."
 
-cd "$REPO/$PROJECT" || exit 1
+cd "$PROJECT_DIR" || exit 1
 
 if [ -f "$TESTS" ]; then
   OUTPUT=$("$PYTHON" "$TESTS" 2>&1)
@@ -49,7 +42,6 @@ if [ -f "$TESTS" ]; then
   fi
   echo "[hook] $OUTPUT"
 else
-  # Fallback inline smoke test if scripts/smoke_tests.py hasn't been generated yet
   "$PYTHON" -c "
 from src.game_state import GameState
 from src.generator import MapGenerator
@@ -69,7 +61,6 @@ fi
 # ── 3. Stage source files only, commit, push ─────────────────────────────────
 cd "$REPO" || exit 1
 
-# Add only source paths — never build artifacts or binaries
 git add "${PROJECT}/" \
   ':!*/__pycache__' \
   ':!*/build/'      \
@@ -79,7 +70,6 @@ git add "${PROJECT}/" \
   ':!*.pyz'         \
   ':!*.pyc'
 
-# Nothing staged means changes were already committed
 if git diff --cached --quiet; then
   echo "[hook] Nothing new to commit."
   exit 0
