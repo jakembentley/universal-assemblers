@@ -207,6 +207,36 @@ TECH_TREE: dict[str, TechNode] = {
         research_cost=1500.0,
         branch="special",
     ),
+
+    "energy_efficiency": TechNode(
+        id="energy_efficiency",
+        name="Energy Efficiency",
+        description="Advanced materials and superconducting grids boost all power plant output by 25%.",
+        prerequisites=[],
+        unlocks=["power_efficiency_bonus"],
+        research_cost=250.0,
+        branch="energy",
+    ),
+
+    "advanced_manufacturing": TechNode(
+        id="advanced_manufacturing",
+        name="Advanced Manufacturing",
+        description="Factory automation enables production of composite components from alloys and electronics.",
+        prerequisites=["refinery_efficiency"],
+        unlocks=["components_production"],
+        research_cost=400.0,
+        branch="energy",
+    ),
+
+    "asteroid_mining": TechNode(
+        id="asteroid_mining",
+        name="Asteroid Mining",
+        description="Equips Mining Vessels with drilling rigs and micro-thrusters for high-yield asteroid extraction.",
+        prerequisites=["solar_sails"],
+        unlocks=["asteroid_mining_enabled"],
+        research_cost=350.0,
+        branch="propulsion",
+    ),
 }
 
 

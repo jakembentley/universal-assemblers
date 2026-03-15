@@ -24,17 +24,19 @@ from .widgets import draw_panel, draw_separator
 # ---------------------------------------------------------------------------
 
 _STRUCTURE_TYPES: list[tuple[str, str, str]] = [
-    ("extractor",           "Extractor",       "⬡"),
-    ("factory",             "Factory",         "⬡"),
-    ("power_plant_solar",   "Solar Plant",     "⬡"),
-    ("power_plant_wind",    "Wind Plant",      "⬡"),
-    ("power_plant_bios",    "Bio Plant",       "⬡"),
-    ("power_plant_fossil",  "Fossil Plant",    "⬡"),
-    ("power_plant_nuclear", "Nuclear Plant",   "⬡"),
-    ("research_array",      "Research Array",  "⬡"),
-    ("replicator",          "Replicator",      "⬡"),
-    ("shipyard",            "Shipyard",        "⬡"),
-    ("storage_hub",         "Storage Hub",     "⬡"),
+    ("extractor",                "Extractor",          "⬡"),
+    ("factory",                  "Factory",            "⬡"),
+    ("power_plant_solar",        "Solar Plant",        "⬡"),
+    ("power_plant_wind",         "Wind Plant",         "⬡"),
+    ("power_plant_bios",         "Bio Plant",          "⬡"),
+    ("power_plant_fossil",       "Fossil Plant",       "⬡"),
+    ("power_plant_nuclear",      "Nuclear Plant",      "⬡"),
+    ("power_plant_cold_fusion",  "Cold Fusion",        "⬡"),
+    ("power_plant_dark_matter",  "Dark Matter",        "⬡"),
+    ("research_array",           "Research Array",     "⬡"),
+    ("replicator",               "Replicator",         "⬡"),
+    ("shipyard",                 "Shipyard",           "⬡"),
+    ("storage_hub",              "Storage Hub",        "⬡"),
 ]
 
 _BOT_TYPES: list[tuple[str, str, str]] = [

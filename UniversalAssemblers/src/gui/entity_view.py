@@ -151,16 +151,25 @@ class EntityView:
         # --- Ship send-to UI state ---
         self._send_mode:      bool       = False
         self._send_system_id: str | None = None
+        self._send_body_id:   str | None = None   # body-level docking target (mining/transport)
 
-        # Scrollable list for system selector
+        # Scrollable lists for system and body selectors
         sys_sel_rect = pygame.Rect(
             self._rect.x + PADDING,
             self._rect.y + HEADER_H + 160,
             self._rect.width - PADDING * 2,
-            TOP_H - HEADER_H - 170,
+            180,
         )
         self._sys_list = ScrollableList(sys_sel_rect, "Select Destination System",
                                         on_select=self._on_send_system_select)
+        body_sel_rect = pygame.Rect(
+            self._rect.x + PADDING,
+            self._rect.y + HEADER_H + 160,
+            self._rect.width - PADDING * 2,
+            140,
+        )
+        self._body_list = ScrollableList(body_sel_rect, "Select Docking Body",
+                                         on_select=self._on_send_body_select)
 
     # ------------------------------------------------------------------
     # Activation
@@ -184,8 +193,9 @@ class EntityView:
         # Default task type based on bot capabilities
         allowed = _BOT_ALLOWED_TASKS.get(type_value, ["mine"])
         self._add_task_type = allowed[0]
-        self._send_mode     = False
+        self._send_mode      = False
         self._send_system_id = None
+        self._send_body_id   = None
         self._hit_rects      = []
 
         if category == "ship":
@@ -247,10 +257,12 @@ class EntityView:
                 # Calculate distance + ETA
                 dist_str = ""
                 if home_pos:
+                    from ..simulation import SHIP_SPEEDS
                     dx = s.position["x"] - home_pos["x"]
                     dy = s.position["y"] - home_pos["y"]
                     dist = math.hypot(dx, dy)
-                    eta_years = 1.0 / 0.25  # travel_speed = 0.25 fraction/year → 4 years
+                    spd = SHIP_SPEEDS.get(self._type_value, 0.25)
+                    eta_years = 1.0 / spd
                     dist_str = f" [{dist:.0f} ly | ~{eta_years:.0f}yr]"
 
                 if s.warp_only:
@@ -263,13 +275,29 @@ class EntityView:
                         color = (90, 120, 160)
                     items.append((f"{s.name}{dist_str}", s.id, color))
         else:
-            # Drop ships and other ships: all discovered/colonized systems
-            items = [
-                (s.name, s.id, None)
-                for s in galaxy.solar_systems
-                if gs.get_state(s.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
-                   and s.id != self._system_id
-            ]
+            # All other ships: any discovered/colonized system; show ETA
+            from ..simulation import SHIP_SPEEDS
+            spd = SHIP_SPEEDS.get(self._type_value, 0.25)
+            eta_years = 1.0 / spd
+            home_pos = None
+            if self._system_id:
+                for s in galaxy.solar_systems:
+                    if s.id == self._system_id:
+                        home_pos = s.position
+                        break
+            items = []
+            for s in galaxy.solar_systems:
+                if s.id == self._system_id:
+                    continue
+                if gs.get_state(s.id) not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
+                    continue
+                dist_str = ""
+                if home_pos:
+                    dx = s.position["x"] - home_pos["x"]
+                    dy = s.position["y"] - home_pos["y"]
+                    dist = math.hypot(dx, dy)
+                    dist_str = f" [{dist:.0f} ly | ~{eta_years:.0f}yr]"
+                items.append((f"{s.name}{dist_str}", s.id, None))
         self._sys_list.set_items(items)
 
     def _on_send_system_select(self, sys_id: str) -> None:
@@ -277,6 +305,67 @@ class EntityView:
         if sys_id.startswith("_warp_"):
             return
         self._send_system_id = sys_id
+        self._send_body_id   = None
+        # For mining_vessel and transport, rebuild body picker for chosen system
+        if self._type_value in ("mining_vessel", "transport"):
+            self._rebuild_body_list(sys_id)
+
+    def _on_send_body_select(self, body_id: str) -> None:
+        self._send_body_id = body_id
+
+    def _rebuild_body_list(self, sys_id: str) -> None:
+        """Populate the body selector with landable bodies in sys_id."""
+        galaxy = self.app.galaxy
+        if not galaxy:
+            return
+        from ..models.celestial import BodyType
+        target_sys = next((s for s in galaxy.solar_systems if s.id == sys_id), None)
+        if not target_sys:
+            return
+
+        items: list[tuple[str, str, tuple | None]] = []
+        for body in target_sys.orbital_bodies:
+            if body.body_type == BodyType.STAR:
+                continue
+            icon = {
+                BodyType.ASTEROID: "⬡ Asteroid",
+                BodyType.COMET:    "☄ Comet",
+                BodyType.PLANET:   "◉ Planet",
+                BodyType.EXOPLANET: "◉ Exoplanet",
+            }.get(body.body_type, "◉ Body")
+            # Mining vessels prefer asteroids; highlight them
+            is_asteroid = body.body_type == BodyType.ASTEROID
+            col = (200, 220, 160) if (is_asteroid and self._type_value == "mining_vessel") else None
+            # Show key resources
+            res = getattr(body, "resources", None)
+            res_str = ""
+            if res:
+                parts = []
+                if getattr(res, "minerals", 0) > 0:
+                    parts.append(f"M:{res.minerals:.0f}")
+                if getattr(res, "rare_minerals", 0) > 0:
+                    parts.append(f"R:{res.rare_minerals:.0f}")
+                if getattr(res, "ice", 0) > 0:
+                    parts.append(f"I:{res.ice:.0f}")
+                if parts:
+                    res_str = "  " + "  ".join(parts)
+            label = f"{icon}: {body.name}{res_str}"
+            items.append((label, body.id, col))
+            # Also add moons as docking targets for transports
+            if self._type_value == "transport":
+                for moon in body.moons:
+                    moon_res = getattr(moon, "resources", None)
+                    m_res_str = ""
+                    if moon_res:
+                        parts = []
+                        if getattr(moon_res, "minerals", 0) > 0:
+                            parts.append(f"M:{moon_res.minerals:.0f}")
+                        if getattr(moon_res, "ice", 0) > 0:
+                            parts.append(f"I:{moon_res.ice:.0f}")
+                        if parts:
+                            m_res_str = "  " + "  ".join(parts)
+                    items.append((f"  ↳ Moon: {moon.name}{m_res_str}", moon.id, (140, 160, 180)))
+        self._body_list.set_items(items)
 
     # ------------------------------------------------------------------
     # Events
@@ -304,6 +393,8 @@ class EntityView:
                 self._handle_structure_events(event)
             elif self._category == "ship":
                 self._sys_list.handle_event(event)
+                if self._send_system_id and self._type_value in ("mining_vessel", "transport"):
+                    self._body_list.handle_event(event)
                 self._handle_ship_events(event)
 
     def _handle_structure_events(self, event: pygame.event.Event) -> None:
@@ -321,6 +412,50 @@ class EntityView:
                 elif action == "toggle_refine":
                     loc = self._body_id or self._system_id or ""
                     gs.extractor_refine_mode[loc] = not gs.extractor_refine_mode.get(loc, False)
+                elif action == "factory_alloc_dec":
+                    task_id, loc = data
+                    gs.factory_tasks.adjust_allocation(loc, task_id, -10)
+                elif action == "factory_alloc_inc":
+                    task_id, loc = data
+                    gs.factory_tasks.adjust_allocation(loc, task_id, +10)
+                elif action == "factory_remove":
+                    task_id, loc = data
+                    gs.factory_tasks.remove(loc, task_id)
+                elif action == "toggle_factory_form":
+                    self._add_task_mode = not self._add_task_mode
+                elif action == "set_res":
+                    self._add_task_res = str(data)
+                elif action == "dec_amount":
+                    self._add_task_amount = max(0, self._add_task_amount - 100)
+                elif action == "inc_amount":
+                    self._add_task_amount = min(99999, self._add_task_amount + 100)
+                elif action == "confirm_factory_task":
+                    from ..game_state import FactoryTask
+                    loc_id = str(data)
+                    valid_recipes = ["alloys", "electronics", "fuel_cells", "components"]
+                    recipe = self._add_task_res if self._add_task_res in valid_recipes else "alloys"
+                    gs.factory_tasks.add(loc_id, FactoryTask(
+                        recipe_id=recipe,
+                        target_amount=float(self._add_task_amount) if self._add_task_amount > 0 else 0.0,
+                        allocation=25,
+                    ))
+                    self._add_task_mode = False
+                elif action == "toggle_shipyard_form":
+                    self._add_task_mode = not self._add_task_mode
+                elif action == "confirm_shipyard_task":
+                    from ..game_state import ShipyardTask
+                    loc_id = str(data)
+                    count = max(1, self._add_task_amount // 100)
+                    valid_ships = ["probe", "drop_ship", "mining_vessel", "transport", "warship"]
+                    ship = self._add_task_res if self._add_task_res in valid_ships else "probe"
+                    gs.shipyard_tasks.add(loc_id, ShipyardTask(
+                        ship_type=ship,
+                        target_count=count,
+                    ))
+                    self._add_task_mode = False
+                elif action == "shipyard_remove":
+                    task_id, loc = data
+                    gs.shipyard_tasks.remove(loc, task_id)
                 return
 
     def _handle_bot_events(self, event: pygame.event.Event) -> None:
@@ -398,10 +533,17 @@ class EntityView:
             if rect.collidepoint(pos):
                 if action == "toggle_send":
                     self._send_mode = not self._send_mode
+                    self._send_system_id = None
+                    self._send_body_id   = None
                     if self._send_mode:
                         self._rebuild_sys_list()
                 elif action == "dispatch_ship":
                     self._dispatch_ship()
+                elif action == "cancel_order":
+                    gs = self.app.game_state
+                    if gs:
+                        loc = self._system_id or ""
+                        gs.order_queue.dequeue(loc, self._type_value)
                 return
 
     def _dispatch_ship(self) -> None:
@@ -411,27 +553,42 @@ class EntityView:
         galaxy = self.app.galaxy
         if not gs or not galaxy:
             return
-        count = gs.entity_roster.total(self._category, self._type_value)
+        loc = self._system_id or ""
+        count = sum(
+            i.count for i in gs.entity_roster.at(loc)
+            if i.category == "ship" and i.type_value == self._type_value
+        )
         if count == 0:
             return
-        # Find first body in target system
+
+        # Determine target body
         target_sys = next(
             (s for s in galaxy.solar_systems if s.id == self._send_system_id), None
         )
-        target_body_id = (
-            target_sys.orbital_bodies[0].id if target_sys and target_sys.orbital_bodies
-            else None
-        )
-        from ..simulation import ShipOrder
+        if self._type_value in ("mining_vessel", "transport") and self._send_body_id:
+            # Player explicitly chose a body — use it
+            target_body_id: str | None = self._send_body_id
+        elif self._type_value == "drop_ship":
+            # Drop ship converts on a planet surface — first orbital body
+            target_body_id = (
+                target_sys.orbital_bodies[0].id
+                if target_sys and target_sys.orbital_bodies else None
+            )
+        else:
+            target_body_id = None
+
+        from ..simulation import ShipOrder, SHIP_SPEEDS
+        speed = SHIP_SPEEDS.get(self._type_value, 0.25)
         order = ShipOrder(
             order_type="travel",
             target_system_id=self._send_system_id,
             target_body_id=target_body_id,
+            travel_speed=speed,
         )
-        loc = self._system_id or ""
         gs.order_queue.enqueue(loc, self._type_value, order)
-        self._send_mode = False
+        self._send_mode      = False
         self._send_system_id = None
+        self._send_body_id   = None
         self.deactivate()
 
     # ------------------------------------------------------------------
@@ -535,6 +692,14 @@ class EntityView:
             if spec.input_resource:
                 txt("Consumes", spec.input_resource.replace("_", " ").title(), C_WARN)
                 txt("Rate (per unit/yr)", f"{spec.input_rate:.1f}")
+            # Show modifier
+            from ..models.entity import compute_power_modifier
+            mod = compute_power_modifier(gs, loc or "", self._type_value) if gs else 1.0
+            mod_col = (80, 220, 100) if mod >= 1.0 else (255, 180, 80)
+            if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                mod_s = font(11).render(f"Env modifier: {mod:.2f}×", True, mod_col)
+                surface.blit(mod_s, (cx, cy))
+            cy += ROW_H
 
         # Extractor refine mode toggle
         if self._type_value == "extractor":
@@ -580,6 +745,102 @@ class EntityView:
                 surface.blit(note2, (cx, cy))
             cy += ROW_H
 
+        # Factory production queue
+        if self._type_value == "factory" and gs:
+            tasks = gs.factory_tasks.get(loc or "")
+            total_alloc = gs.factory_tasks.total_allocation(loc or "")
+            cy += 4
+            if cy < self._rect.bottom:
+                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                fh = font(11, bold=True).render("PRODUCTION", True, C_ACCENT)
+                surface.blit(fh, (cx, cy + 3))
+            cy += 18
+            alloc_s = font(11).render(f"Capacity used: {total_alloc}%", True, C_TEXT_DIM)
+            if cy < self._rect.bottom:
+                surface.blit(alloc_s, (cx, cy))
+            cy += 14
+            for task in tasks:
+                if cy + 40 > self._rect.bottom - 60:
+                    break
+                tr = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 38)
+                pygame.draw.rect(surface, (18, 30, 60), tr, border_radius=3)
+                pygame.draw.rect(surface, C_BORDER, tr, width=1, border_radius=3)
+                desc = task.recipe_id.replace("_", " ").title()
+                if task.target_amount > 0:
+                    prog_str = f"{task.produced:.0f}/{task.target_amount:.0f}"
+                    prog_frac = min(1.0, task.produced / max(1, task.target_amount))
+                else:
+                    prog_str = f"{task.produced:.0f} (cont.)"
+                    prog_frac = 1.0
+                surface.blit(font(12, bold=True).render(desc, True, C_TEXT), (cx + 6, cy + 4))
+                surface.blit(font(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
+                pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(cx + 6, cy + 32, 180, 4))
+                if prog_frac > 0:
+                    pygame.draw.rect(surface, (80, 200, 255), pygame.Rect(cx + 6, cy + 32, int(180 * prog_frac), 4))
+                # Allocation controls
+                ax = tr.right - 110
+                dec_r = pygame.Rect(ax, cy + 8, 22, 22)
+                inc_r = pygame.Rect(ax + 50, cy + 8, 22, 22)
+                alloc_s2 = font(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
+                pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
+                surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 5, dec_r.y + 2))
+                surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 5, inc_r.y + 2))
+                surface.blit(alloc_s2, (ax + 26, cy + 10))
+                self._hit_rects.append((dec_r, "factory_alloc_dec", (task.task_id, loc or "")))
+                self._hit_rects.append((inc_r, "factory_alloc_inc", (task.task_id, loc or "")))
+                rm_r = pygame.Rect(tr.right - 26, cy + 8, 22, 22)
+                pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
+                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
+                self._hit_rects.append((rm_r, "factory_remove", (task.task_id, loc or "")))
+                cy += 44
+            # Add recipe button
+            add_r = pygame.Rect(cx, cy + 4, 140, 26)
+            pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN, add_r, border_radius=4)
+            btn_txt = "▼  ADD RECIPE" if not self._add_task_mode else "▲  CANCEL"
+            btn_surf = font(12, bold=True).render(btn_txt, True, C_BTN_TXT)
+            surface.blit(btn_surf, btn_surf.get_rect(center=add_r.center))
+            self._hit_rects.append((add_r, "toggle_factory_form", loc or ""))
+            cy += 36
+            if self._add_task_mode:
+                cy = self._draw_factory_form(surface, cx, cy, loc or "")
+
+        # Shipyard build queue
+        if self._type_value == "shipyard" and gs:
+            tasks = gs.shipyard_tasks.get(loc or "")
+            cy += 4
+            if cy < self._rect.bottom:
+                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                sh_lbl = font(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
+                surface.blit(sh_lbl, (cx, cy + 3))
+            cy += 18
+            for task in tasks:
+                if cy + 38 > self._rect.bottom - 60:
+                    break
+                tr = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 36)
+                pygame.draw.rect(surface, (18, 30, 60), tr, border_radius=3)
+                pygame.draw.rect(surface, C_BORDER, tr, width=1, border_radius=3)
+                name = task.ship_type.replace("_", " ").title()
+                surface.blit(font(12, bold=True).render(name, True, C_TEXT), (cx + 6, cy + 4))
+                prog_str = f"{task.built_count}/{task.target_count}  (+{task.progress:.0%})"
+                surface.blit(font(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
+                rm_r = pygame.Rect(tr.right - 26, cy + 7, 22, 22)
+                pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
+                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
+                self._hit_rects.append((rm_r, "shipyard_remove", (task.task_id, loc or "")))
+                cy += 40
+            # Add ship button
+            add_r = pygame.Rect(cx, cy + 4, 140, 26)
+            pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN, add_r, border_radius=4)
+            btn_lbl_s = font(12, bold=True).render(
+                "▼  BUILD SHIP" if not self._add_task_mode else "▲  CANCEL", True, C_BTN_TXT
+            )
+            surface.blit(btn_lbl_s, btn_lbl_s.get_rect(center=add_r.center))
+            self._hit_rects.append((add_r, "toggle_shipyard_form", loc or ""))
+            cy += 36
+            if self._add_task_mode:
+                cy = self._draw_shipyard_form(surface, cx, cy, loc or "")
+
         # Incoming build queue for this structure type
         if gs:
             queue_tasks = []
@@ -604,6 +865,116 @@ class EntityView:
         self._struct_scroll = min(self._struct_scroll, max_scroll)
 
         return cy_in + max(0, cy - cy_in + self._struct_scroll)
+
+    def _draw_factory_form(self, surface: pygame.Surface, cx: int, cy: int, loc: str) -> int:
+        from ..models.entity import FACTORY_RECIPES
+        from ..game_state import FactoryTask
+        gs = self.app.game_state
+        if not gs:
+            return cy
+
+        recipes = list(FACTORY_RECIPES.keys())
+        # Gate components on advanced_manufacturing
+        if not gs.tech.is_researched("advanced_manufacturing"):
+            recipes = [r for r in recipes if r != "components"]
+
+        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3,
+                             26 + len(recipes) * 26 + 62)
+        pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
+        pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
+        fy = cy + 8
+        fx = cx + 8
+
+        # Recipe selector
+        for i, rid in enumerate(recipes):
+            rr = pygame.Rect(fx, fy + i * 26, form_r.width - 20, 22)
+            sel = self._add_task_res == rid
+            pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, rr, border_radius=3)
+            inputs, rate, out_field = FACTORY_RECIPES[rid]
+            cost_parts = " + ".join(f"{v:.0f} {k.replace('_',' ')}" for k, v in inputs.items())
+            label = f"{rid.replace('_',' ').title()}  ({rate:.0f}/factory/yr)  <- {cost_parts}"
+            surface.blit(
+                font(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
+                (rr.x + 4, rr.y + 4),
+            )
+            self._hit_rects.append((rr, "set_res", rid))
+        fy += len(recipes) * 26 + 6
+
+        # Amount row
+        dec_r = pygame.Rect(fx, fy, 26, 22)
+        inc_r = pygame.Rect(fx + 90, fy, 26, 22)
+        pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
+        pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
+        surface.blit(font(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        amt_lbl = font(12, bold=True).render(str(self._add_task_amount), True, C_SELECTED)
+        surface.blit(amt_lbl, (fx + 34, fy + 3))
+        surface.blit(font(11).render("units (0=unlimited)", True, C_TEXT_DIM), (fx + 120, fy + 4))
+        self._hit_rects.append((dec_r, "dec_amount", None))
+        self._hit_rects.append((inc_r, "inc_amount", None))
+        fy += 30
+
+        conf_r = pygame.Rect(fx, fy, 110, 24)
+        pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
+        conf_s = font(12, bold=True).render("ASSIGN", True, (200, 255, 220))
+        surface.blit(conf_s, conf_s.get_rect(center=conf_r.center))
+        self._hit_rects.append((conf_r, "confirm_factory_task", loc))
+
+        return fy + 32
+
+    def _draw_shipyard_form(self, surface: pygame.Surface, cx: int, cy: int, loc: str) -> int:
+        from ..models.entity import SHIPYARD_BUILD_RATES, BUILD_COSTS
+        from ..game_state import ShipyardTask
+        gs = self.app.game_state
+        if not gs:
+            return cy
+
+        ships = list(SHIPYARD_BUILD_RATES.keys())
+        if not gs.tech.is_researched("atomic_warships"):
+            ships = [s for s in ships if s != "warship"]
+
+        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3,
+                             26 + len(ships) * 26 + 62)
+        pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
+        pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
+        fy = cy + 8
+        fx = cx + 8
+
+        for i, stype in enumerate(ships):
+            sr = pygame.Rect(fx, fy + i * 26, form_r.width - 20, 22)
+            sel = self._add_task_res == stype
+            pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, sr, border_radius=3)
+            build_t = SHIPYARD_BUILD_RATES[stype]
+            cost = BUILD_COSTS.get(stype, {})
+            cost_str = " + ".join(f"{v:.0f} {k.replace('_',' ')}" for k, v in cost.items())
+            label = f"{stype.replace('_',' ').title()}  ({build_t:.1f} yr/ship)  <- {cost_str}"
+            surface.blit(
+                font(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
+                (sr.x + 4, sr.y + 4),
+            )
+            self._hit_rects.append((sr, "set_res", stype))
+        fy += len(ships) * 26 + 6
+
+        dec_r = pygame.Rect(fx, fy, 26, 22)
+        inc_r = pygame.Rect(fx + 90, fy, 26, 22)
+        pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
+        pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
+        surface.blit(font(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        count = max(1, self._add_task_amount // 100)
+        surface.blit(font(12, bold=True).render(str(count), True, C_SELECTED), (fx + 34, fy + 3))
+        surface.blit(font(11).render("ships to build", True, C_TEXT_DIM), (fx + 120, fy + 4))
+        self._hit_rects.append((dec_r, "dec_amount", None))
+        self._hit_rects.append((inc_r, "inc_amount", None))
+        fy += 30
+
+        conf_r = pygame.Rect(fx, fy, 110, 24)
+        pygame.draw.rect(surface, (0, 80, 160), conf_r, border_radius=4)
+        conf_s = font(12, bold=True).render("QUEUE BUILD", True, (200, 230, 255))
+        surface.blit(conf_s, conf_s.get_rect(center=conf_r.center))
+        self._hit_rects.append((conf_r, "confirm_shipyard_task", loc))
+
+        return fy + 32
 
     # ------------------------------------------------------------------
     # Bot panel
@@ -836,6 +1207,7 @@ class EntityView:
     # Ship panel
 
     def _draw_ship(self, surface: pygame.Surface, cx: int, cy_in: int) -> int:
+        from ..simulation import SHIP_SPEEDS
         gs = self.app.game_state
         if not gs:
             return cy_in
@@ -856,48 +1228,91 @@ class EntityView:
         count = self._count_at_location()
         txt("In system", str(count))
 
+        # Ship role / stats
+        _SHIP_ROLES = {
+            "probe":         "Recon — scouts new systems",
+            "drop_ship":     "Colony — deploys Constructor + Miner on arrival",
+            "mining_vessel": "Extraction — docks at bodies to mine resources",
+            "transport":     "Cargo — ferries resources between colonies",
+            "warship":       "Combat — system defence and projection",
+        }
+        _SHIP_SPEED_LABELS = {
+            "probe": "Fast", "transport": "Medium",
+            "mining_vessel": "Medium", "drop_ship": "Slow", "warship": "Very Slow",
+        }
+        role = _SHIP_ROLES.get(self._type_value, "")
+        spd  = SHIP_SPEEDS.get(self._type_value, 0.25)
+        spd_lbl = _SHIP_SPEED_LABELS.get(self._type_value, f"{spd:.0%}/yr")
+        if cy >= content_top - ROW_H and cy < self._rect.bottom:
+            rs = font(11).render(role, True, C_TEXT_DIM)
+            surface.blit(rs, (cx, cy))
+        cy += ROW_H - 4
+        txt("Speed", f"{spd_lbl}  ({spd:.0%}/yr)", C_TEXT_DIM)
+
         # Travel queue
         orders = gs.order_queue.get_all(loc, self._type_value)
-        cy += 8
-        draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-        qlbl = font(11, bold=True).render("TRAVEL QUEUE", True, C_ACCENT)
-        surface.blit(qlbl, (cx, cy + 3))
+        cy += 4
+        if cy < self._rect.bottom:
+            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+            qlbl = font(11, bold=True).render("TRAVEL QUEUE", True, C_ACCENT)
+            surface.blit(qlbl, (cx, cy + 3))
         cy += 18
 
         if orders:
-            for order in orders[:5]:
+            galaxy = self.app.galaxy
+            for i, order in enumerate(orders[:5]):
                 dest_str = order.target_system_id or "?"
-                prog_str = f"{order.progress:.0%}"
-                galaxy = self.app.galaxy
                 if galaxy:
                     sys_obj = next(
                         (s for s in galaxy.solar_systems if s.id == dest_str), None
                     )
                     if sys_obj:
                         dest_str = sys_obj.name
-                row_s = font(12).render(
-                    f"▶  {dest_str}  —  {prog_str} complete", True, C_TEXT
-                )
-                surface.blit(row_s, (cx + 6, cy))
-                pbar_w = min(200, self._rect.width - PADDING * 4)
-                pygame.draw.rect(surface, (30, 50, 80),
-                                 pygame.Rect(cx + 6, cy + 16, pbar_w, 4))
-                pygame.draw.rect(surface, C_ACCENT,
-                                 pygame.Rect(cx + 6, cy + 16, int(pbar_w * order.progress), 4))
+                # Show body docking target if present
+                if order.target_body_id and order.target_body_id != order.target_system_id:
+                    dest_str += "  (body)"
+                prog_str = f"{order.progress:.0%}"
+                eta_frac = 1.0 - order.progress
+                eta_yr = eta_frac / max(order.travel_speed, 0.01)
+                row_col = C_ACCENT if i == 0 else C_TEXT_DIM
+                if cy >= content_top - ROW_H and cy < self._rect.bottom:
+                    row_s = font(12).render(
+                        f"{'▶' if i == 0 else '◦'}  {dest_str}  —  {prog_str}"
+                        f"  (~{eta_yr:.1f}yr)",
+                        True, row_col,
+                    )
+                    surface.blit(row_s, (cx + 6, cy))
+                    pbar_w = min(200, self._rect.width - PADDING * 4 - 30)
+                    pygame.draw.rect(surface, (30, 50, 80),
+                                     pygame.Rect(cx + 6, cy + 16, pbar_w, 4))
+                    pygame.draw.rect(surface, C_ACCENT,
+                                     pygame.Rect(cx + 6, cy + 16,
+                                                 int(pbar_w * order.progress), 4))
+                    # Cancel button for the first (active) order
+                    if i == 0:
+                        cx_btn = cx + 6 + pbar_w + 6
+                        cncl_r = pygame.Rect(cx_btn, cy + 10, 22, 22)
+                        pygame.draw.rect(surface, (80, 20, 20), cncl_r, border_radius=3)
+                        surface.blit(
+                            font(11, bold=True).render("✕", True, (255, 100, 100)),
+                            (cncl_r.x + 4, cncl_r.y + 3),
+                        )
+                        self._hit_rects.append((cncl_r, "cancel_order", None))
                 cy += 26
         else:
-            no_ord = font(12).render("No orders queued.", True, C_TEXT_DIM)
-            surface.blit(no_ord, (cx, cy))
+            if cy < self._rect.bottom:
+                no_ord = font(12).render("No orders queued.", True, C_TEXT_DIM)
+                surface.blit(no_ord, (cx, cy))
             cy += ROW_H
 
-        # Drop Ship / Probe dispatch
-        if self._type_value in ("drop_ship", "probe") and count > 0:
+        # Dispatch panel — available for ALL ship types when ships are present
+        if count > 0:
             cy += 8
-            send_btn_r = pygame.Rect(cx, cy, 160, 28)
+            send_btn_r = pygame.Rect(cx, cy, 170, 28)
             pygame.draw.rect(surface, C_BTN_HOV if self._send_mode else C_BTN,
                              send_btn_r, border_radius=4)
             send_lbl = font(12, bold=True).render(
-                "▼  SEND SHIP" if not self._send_mode else "▲  CANCEL SEND",
+                "▼  DISPATCH SHIP" if not self._send_mode else "▲  CANCEL",
                 True, C_BTN_TXT,
             )
             surface.blit(send_lbl, send_lbl.get_rect(center=send_btn_r.center))
@@ -905,31 +1320,70 @@ class EntityView:
             cy += 36
 
             if self._send_mode:
-                self._sys_list.rect = pygame.Rect(
-                    cx, cy,
-                    self._rect.width - PADDING * 2,
-                    min(200, self._rect.bottom - cy - 50),
-                )
+                # Step 1 — System selector
+                avail_h = max(80, min(180, self._rect.bottom - cy - 60))
+                self._sys_list.rect = pygame.Rect(cx, cy, self._rect.width - PADDING * 2, avail_h)
                 self._sys_list.draw(surface)
-                cy += self._sys_list.rect.height + 8
+                cy += avail_h + 6
 
-                if self._send_system_id:
-                    disp_btn_r = pygame.Rect(cx, cy, 140, 28)
-                    pygame.draw.rect(surface, (0, 110, 180), disp_btn_r, border_radius=4)
+                # Step 2 — Body selector (mining_vessel / transport only)
+                if self._send_system_id and self._type_value in ("mining_vessel", "transport"):
                     galaxy = self.app.galaxy
                     dest_name = self._send_system_id
                     if galaxy:
                         sys_obj = next(
-                            (s for s in galaxy.solar_systems
-                             if s.id == self._send_system_id), None
+                            (s for s in galaxy.solar_systems if s.id == self._send_system_id), None
                         )
                         if sys_obj:
                             dest_name = sys_obj.name
+                    if cy < self._rect.bottom:
+                        hint_col = (180, 220, 160) if self._type_value == "mining_vessel" \
+                                   else (180, 200, 255)
+                        hl = font(11, bold=True).render(
+                            f"Select docking body in {dest_name}:", True, hint_col
+                        )
+                        surface.blit(hl, (cx, cy))
+                    cy += 16
+                    body_h = max(60, min(140, self._rect.bottom - cy - 40))
+                    self._body_list.rect = pygame.Rect(cx, cy, self._rect.width - PADDING * 2, body_h)
+                    self._body_list.draw(surface)
+                    cy += body_h + 6
+
+                # Dispatch button — show when system chosen (body optional for transport/mining)
+                if self._send_system_id:
+                    # For mining_vessel/transport: require body selection OR allow system-level
+                    needs_body = self._type_value in ("mining_vessel", "transport")
+                    has_body   = bool(self._send_body_id)
+                    can_dispatch = not needs_body or has_body
+
+                    galaxy = self.app.galaxy
+                    dest_name = self._send_system_id
+                    body_name = ""
+                    if galaxy:
+                        sys_obj = next(
+                            (s for s in galaxy.solar_systems if s.id == self._send_system_id), None
+                        )
+                        if sys_obj:
+                            dest_name = sys_obj.name
+                        if self._send_body_id and galaxy:
+                            for sys in galaxy.solar_systems:
+                                for body in sys.orbital_bodies:
+                                    if body.id == self._send_body_id:
+                                        body_name = f" → {body.name}"
+                                    for moon in body.moons:
+                                        if moon.id == self._send_body_id:
+                                            body_name = f" → {moon.name}"
+
+                    disp_col = (0, 120, 60) if can_dispatch else (40, 60, 80)
+                    disp_btn_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 28)
+                    pygame.draw.rect(surface, disp_col, disp_btn_r, border_radius=4)
                     disp_lbl = font(12, bold=True).render(
-                        f"DISPATCH → {dest_name}", True, (200, 240, 255)
+                        f"DISPATCH → {dest_name}{body_name}",
+                        True, (200, 255, 220) if can_dispatch else C_TEXT_DIM,
                     )
                     surface.blit(disp_lbl, disp_lbl.get_rect(center=disp_btn_r.center))
-                    self._hit_rects.append((disp_btn_r, "dispatch_ship", None))
+                    if can_dispatch:
+                        self._hit_rects.append((disp_btn_r, "dispatch_ship", None))
                     cy += 36
 
         # Clamp ship scroll

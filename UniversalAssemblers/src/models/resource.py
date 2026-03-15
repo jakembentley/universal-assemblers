@@ -23,6 +23,7 @@ class Resource:
     electronics: float = 0.0  # from minerals + rare_minerals
     alloys: float = 0.0        # from minerals
     fuel_cells: float = 0.0    # from gas + ice
+    components: float = 0.0    # advanced manufactured parts (alloys + electronics)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -39,4 +40,5 @@ class Resource:
             electronics=d.get("electronics", 0.0),
             alloys=d.get("alloys", 0.0),
             fuel_cells=d.get("fuel_cells", 0.0),
+            components=d.get("components", 0.0),
         )

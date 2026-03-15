@@ -90,6 +90,149 @@ class BotTaskList:
 
 
 # ---------------------------------------------------------------------------
+# Factory tasks
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FactoryTask:
+    """One production run assigned to factories at a location."""
+    recipe_id:     str    # key into FACTORY_RECIPES
+    target_amount: float  # units to produce (0 = unlimited/continuous)
+    allocation:    int   = 25    # 0–100 % of factory throughput
+    produced:      float = 0.0
+    task_id:       str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+
+    @property
+    def complete(self) -> bool:
+        return self.target_amount > 0 and self.produced >= self.target_amount
+
+
+class FactoryTaskList:
+    """Factory production tasks keyed by location_id."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, list[FactoryTask]] = {}
+
+    def get(self, location_id: str) -> list[FactoryTask]:
+        return self._tasks.get(location_id, [])
+
+    def add(self, location_id: str, task: FactoryTask) -> None:
+        if location_id not in self._tasks:
+            self._tasks[location_id] = []
+        self._tasks[location_id].append(task)
+
+    def remove(self, location_id: str, task_id: str) -> None:
+        self._tasks[location_id] = [
+            t for t in self._tasks.get(location_id, []) if t.task_id != task_id
+        ]
+
+    def adjust_allocation(self, location_id: str, task_id: str, delta: int) -> None:
+        tasks = self.get(location_id)
+        task = next((t for t in tasks if t.task_id == task_id), None)
+        if not task:
+            return
+        used = sum(t.allocation for t in tasks if t.task_id != task_id)
+        task.allocation = max(0, min(max(0, 100 - used), task.allocation + delta))
+
+    def total_allocation(self, location_id: str) -> int:
+        return sum(t.allocation for t in self.get(location_id))
+
+    def all_keys(self) -> list[str]:
+        return list(self._tasks.keys())
+
+    def to_dict(self) -> dict:
+        return {
+            loc: [
+                {"recipe_id": t.recipe_id, "target_amount": t.target_amount,
+                 "allocation": t.allocation, "produced": t.produced, "task_id": t.task_id}
+                for t in tasks
+            ]
+            for loc, tasks in self._tasks.items()
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FactoryTaskList":
+        import uuid as _u
+        ftl = cls()
+        for loc, tasks in d.items():
+            for td in tasks:
+                ftl.add(loc, FactoryTask(
+                    recipe_id=td["recipe_id"],
+                    target_amount=td["target_amount"],
+                    allocation=td.get("allocation", 25),
+                    produced=td.get("produced", 0.0),
+                    task_id=td.get("task_id", _u.uuid4().hex[:8]),
+                ))
+        return ftl
+
+
+# ---------------------------------------------------------------------------
+# Shipyard tasks
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ShipyardTask:
+    """One ship production run assigned to a shipyard location."""
+    ship_type:    str
+    target_count: int
+    built_count:  int   = 0
+    progress:     float = 0.0
+    task_id:      str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+
+    @property
+    def complete(self) -> bool:
+        return self.built_count >= self.target_count
+
+
+class ShipyardTaskList:
+    """Shipyard build queues keyed by location_id."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, list[ShipyardTask]] = {}
+
+    def get(self, location_id: str) -> list[ShipyardTask]:
+        return self._tasks.get(location_id, [])
+
+    def add(self, location_id: str, task: ShipyardTask) -> None:
+        if location_id not in self._tasks:
+            self._tasks[location_id] = []
+        self._tasks[location_id].append(task)
+
+    def remove(self, location_id: str, task_id: str) -> None:
+        self._tasks[location_id] = [
+            t for t in self._tasks.get(location_id, []) if t.task_id != task_id
+        ]
+
+    def all_keys(self) -> list[str]:
+        return list(self._tasks.keys())
+
+    def to_dict(self) -> dict:
+        return {
+            loc: [
+                {"ship_type": t.ship_type, "target_count": t.target_count,
+                 "built_count": t.built_count, "progress": t.progress, "task_id": t.task_id}
+                for t in tasks
+            ]
+            for loc, tasks in self._tasks.items()
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ShipyardTaskList":
+        import uuid as _u
+        stl = cls()
+        for loc, tasks in d.items():
+            for td in tasks:
+                stl.add(loc, ShipyardTask(
+                    ship_type=td["ship_type"],
+                    target_count=td["target_count"],
+                    built_count=td.get("built_count", 0),
+                    progress=td.get("progress", 0.0),
+                    task_id=td.get("task_id", _u.uuid4().hex[:8]),
+                ))
+        return stl
+
+
+# ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
 
@@ -283,6 +426,10 @@ class GameState:
         self.power_plant_active: dict[str, bool] = {}
         # extractor_refine_mode: key = body_id, default False
         self.extractor_refine_mode: dict[str, bool] = {}
+        self.factory_tasks:  FactoryTaskList  = FactoryTaskList()
+        self.shipyard_tasks: ShipyardTaskList = ShipyardTaskList()
+        # body_env cache: body_id → {orbital_radius, subtype, star_luminosity}
+        self.body_env: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Factory
@@ -339,6 +486,7 @@ class GameState:
         # Build sim engine now that galaxy and bio_state are populated
         from .simulation import SimulationEngine
         gs.sim_engine = SimulationEngine(gs)
+        gs._rebuild_body_env()
 
         return gs
 
@@ -362,6 +510,30 @@ class GameState:
                             make_bio_population(moon.id, sys.id, moon.resources.bios, rng,
                                                 uplift_multiplier=bio_uplift_mult)
                         )
+
+    def _rebuild_body_env(self) -> None:
+        """Cache orbital + atmospheric environment data for all bodies."""
+        if not self.galaxy:
+            return
+        self.body_env = {}
+        for sys in self.galaxy.solar_systems:
+            star_lum = sys.star.resources.energy_output
+            for body in sys.orbital_bodies:
+                self.body_env[body.id] = {
+                    "orbital_radius": body.orbital_radius,
+                    "subtype": getattr(body, "subtype", "") or "",
+                    "star_luminosity": star_lum,
+                    "body_type": body.body_type.value,
+                    "system_id": sys.id,
+                }
+                for moon in body.moons:
+                    self.body_env[moon.id] = {
+                        "orbital_radius": body.orbital_radius,  # moon inherits planet's orbit
+                        "subtype": "moon",
+                        "star_luminosity": star_lum,
+                        "body_type": "moon",
+                        "system_id": sys.id,
+                    }
 
     # ------------------------------------------------------------------
     # Simulation tick
@@ -443,6 +615,8 @@ class GameState:
             "tech":                 self.tech.to_dict(),
             "power_plant_active":   dict(self.power_plant_active),
             "extractor_refine_mode": dict(self.extractor_refine_mode),
+            "factory_tasks":        self.factory_tasks.to_dict(),
+            "shipyard_tasks":       self.shipyard_tasks.to_dict(),
         }
 
     @classmethod
@@ -459,10 +633,13 @@ class GameState:
         gs.tech                  = TechState.from_dict(d.get("tech", {}))
         gs.power_plant_active    = dict(d.get("power_plant_active", {}))
         gs.extractor_refine_mode = dict(d.get("extractor_refine_mode", {}))
+        gs.factory_tasks  = FactoryTaskList.from_dict(d.get("factory_tasks", {}))
+        gs.shipyard_tasks = ShipyardTaskList.from_dict(d.get("shipyard_tasks", {}))
 
         gs._init_bio_state()
 
         from .simulation import SimulationEngine
         gs.sim_engine = SimulationEngine(gs)
+        gs._rebuild_body_env()
 
         return gs

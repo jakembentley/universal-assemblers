@@ -339,6 +339,8 @@ class NavPanel:
                     txt("Alloys",      f"{res.alloys:,.1f}",      value_col=_mfg)
                 if res.fuel_cells > 0:
                     txt("Fuel Cells",  f"{res.fuel_cells:,.1f}",  value_col=_mfg)
+                if res.components > 0:
+                    txt("Components",  f"{res.components:,.1f}",  value_col=_mfg)
                 # Bio population
                 gs = self.app.game_state
                 if gs:
@@ -389,6 +391,8 @@ class NavPanel:
                     txt("Alloys",      f"{res.alloys:,.1f}",      value_col=_mfg_col)
                 if res.fuel_cells > 0:
                     txt("Fuel Cells",  f"{res.fuel_cells:,.1f}",  value_col=_mfg_col)
+                if res.components > 0:
+                    txt("Components",  f"{res.components:,.1f}",  value_col=_mfg_col)
                 # Power balance
                 gs = self.app.game_state
                 if gs:

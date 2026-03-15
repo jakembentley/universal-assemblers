@@ -93,6 +93,17 @@ def make_bio_population(
 # Ship orders
 # ---------------------------------------------------------------------------
 
+# Travel speed (fraction of journey completed per in-game year) per ship type.
+# Higher = faster.  Probes are recon craft; warships are heavily armoured.
+SHIP_SPEEDS: dict[str, float] = {
+    "probe":          0.50,
+    "mining_vessel":  0.30,
+    "transport":      0.25,
+    "drop_ship":      0.20,
+    "warship":        0.15,
+}
+
+
 @dataclass
 class ShipOrder:
     """One pending travel order for a ship stack."""
@@ -184,6 +195,8 @@ class SimulationEngine:
         events.extend(self._tick_ships(dt_years))
         events.extend(self._tick_bot_tasks(dt_years))
         self._tick_extractors(dt_years)
+        events.extend(self._tick_factories(dt_years))
+        events.extend(self._tick_shipyards(dt_years))
         return events
 
     # ------------------------------------------------------------------
@@ -321,17 +334,23 @@ class SimulationEngine:
                 })
 
             else:
-                # All other ship types: move to destination, stay in roster
+                # All other ship types: move to destination, stay in roster.
+                # Mining vessels and transports can dock at a specific body;
+                # warships operate at system level.
                 dest_sys = order.target_system_id or loc_id
+                if ship_type in ("mining_vessel", "transport") and order.target_body_id:
+                    dest = order.target_body_id
+                else:
+                    dest = dest_sys
                 roster.remove("ship", ship_type, loc_id, 1)
-                roster.add("ship", ship_type, dest_sys, 1)
+                roster.add("ship", ship_type, dest, 1)
                 if order.target_system_id:
                     self.gs.discover_system(order.target_system_id)
                     self.gs.probed_systems.add(order.target_system_id)
                 events.append({
                     "type": "ship_arrived",
                     "ship_type": ship_type,
-                    "destination": dest_sys,
+                    "destination": dest,
                     "source": loc_id,
                 })
 
@@ -395,10 +414,19 @@ class SimulationEngine:
 
         for loc_id, bot_type in list(gs.bot_tasks.all_keys()):
             tasks     = gs.bot_tasks.get(loc_id, bot_type)
-            bot_count = gs.entity_roster.total("bot", bot_type)
+            bot_count = sum(
+                i.count for i in gs.entity_roster.at(loc_id)
+                if i.category in ("bot", "ship") and i.type_value == bot_type
+            )
             if bot_count == 0:
                 continue
             body = body_map.get(loc_id)
+
+            # Asteroid mining gate: mining_vessel tasks at asteroids require tech
+            if bot_type == "mining_vessel":
+                if not gs.tech.is_researched("asteroid_mining"):
+                    continue
+                # mining_vessel tasks are ship-category
 
             # Power throttle: reduce effective work rate if power is insufficient
             prod, cons = compute_energy_balance(gs, loc_id)
@@ -470,5 +498,157 @@ class SimulationEngine:
 
             for tid in completed_ids:
                 gs.bot_tasks.remove(loc_id, bot_type, tid)
+
+        return events
+
+    def _tick_factories(self, dt_years: float) -> list:
+        """Run factory production recipes."""
+        from .models.entity import FACTORY_RECIPES, compute_energy_balance
+        events: list = []
+        gs     = self.gs
+        galaxy = gs.galaxy
+        if not galaxy:
+            return events
+
+        body_map: dict[str, object] = {}
+        for sys in galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                body_map[body.id] = body
+                for moon in body.moons:
+                    body_map[moon.id] = moon
+
+        for loc_id in list(gs.factory_tasks.all_keys()):
+            tasks = gs.factory_tasks.get(loc_id)
+            factory_count = sum(
+                i.count for i in gs.entity_roster.at(loc_id)
+                if i.category == "structure" and i.type_value == "factory"
+            )
+            if factory_count == 0:
+                continue
+            body = body_map.get(loc_id)
+            if not body:
+                continue
+            res = body.resources  # type: ignore[attr-defined]
+
+            # Power throttle
+            prod, cons = compute_energy_balance(gs, loc_id)
+            throttle = min(1.0, prod / max(cons, 1.0)) if cons > 0 else 1.0
+
+            completed: list[str] = []
+            for task in tasks:
+                if task.complete:
+                    completed.append(task.task_id)
+                    continue
+                # Gate: components recipe requires advanced_manufacturing tech
+                if task.recipe_id == "components" and not gs.tech.is_researched("advanced_manufacturing"):
+                    continue
+                recipe = FACTORY_RECIPES.get(task.recipe_id)
+                if not recipe:
+                    continue
+                inputs, rate_per_factory, out_field = recipe
+                alloc_frac    = task.allocation / 100.0
+                output_amount = rate_per_factory * factory_count * alloc_frac * throttle * dt_years
+
+                # Check inputs
+                scale = 1.0
+                for r, cost_per_unit in inputs.items():
+                    available = getattr(res, r, 0.0)
+                    max_from_r = available / max(cost_per_unit, 1e-9)
+                    scale = min(scale, max_from_r / max(output_amount, 1e-9))
+                scale = max(0.0, min(1.0, scale))
+                actual_output = output_amount * scale
+
+                if actual_output > 0:
+                    for r, cost_per_unit in inputs.items():
+                        consumed = cost_per_unit * actual_output
+                        setattr(res, r, max(0.0, getattr(res, r, 0.0) - consumed))
+                    setattr(res, out_field, getattr(res, out_field, 0.0) + actual_output)
+                    task.produced += actual_output
+                    if task.complete:
+                        events.append({
+                            "type": "factory_complete",
+                            "recipe": task.recipe_id,
+                            "location": loc_id,
+                        })
+
+                if task.complete:
+                    completed.append(task.task_id)
+
+            for tid in completed:
+                gs.factory_tasks.remove(loc_id, tid)
+
+        return events
+
+    def _tick_shipyards(self, dt_years: float) -> list:
+        """Build ships in shipyard queues."""
+        from .models.entity import SHIPYARD_BUILD_RATES, BUILD_COSTS, compute_energy_balance
+        events: list = []
+        gs     = self.gs
+        galaxy = gs.galaxy
+        if not galaxy:
+            return events
+
+        body_map: dict[str, object] = {}
+        body_to_system: dict[str, str] = {}
+        for sys in galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                body_map[body.id] = body
+                body_to_system[body.id] = sys.id
+                for moon in body.moons:
+                    body_map[moon.id] = moon
+                    body_to_system[moon.id] = sys.id
+
+        for loc_id in list(gs.shipyard_tasks.all_keys()):
+            tasks = gs.shipyard_tasks.get(loc_id)
+            shipyard_count = sum(
+                i.count for i in gs.entity_roster.at(loc_id)
+                if i.category == "structure" and i.type_value == "shipyard"
+            )
+            if shipyard_count == 0:
+                continue
+            body = body_map.get(loc_id)
+            if not body:
+                continue
+            res = body.resources  # type: ignore[attr-defined]
+
+            prod, cons = compute_energy_balance(gs, loc_id)
+            throttle = min(1.0, prod / max(cons, 1.0)) if cons > 0 else 1.0
+
+            completed: list[str] = []
+            for task in tasks:
+                if task.complete:
+                    completed.append(task.task_id)
+                    continue
+                # Gate warships behind atomic_warships tech
+                if task.ship_type == "warship" and not gs.tech.is_researched("atomic_warships"):
+                    continue
+
+                build_time = SHIPYARD_BUILD_RATES.get(task.ship_type, 2.0)
+                progress_this_tick = (shipyard_count / build_time) * throttle * dt_years
+                task.progress += progress_this_tick
+
+                cost = BUILD_COSTS.get(task.ship_type, {})
+                while task.progress >= 1.0 and task.built_count < task.target_count:
+                    if cost:
+                        if not all(getattr(res, r, 0.0) >= amt for r, amt in cost.items()):
+                            task.progress = min(task.progress, 0.9999)
+                            break
+                        for r, amt in cost.items():
+                            setattr(res, r, max(0.0, getattr(res, r, 0.0) - amt))
+                    task.progress    -= 1.0
+                    task.built_count += 1
+                    dest_sys = body_to_system.get(loc_id, loc_id)
+                    gs.entity_roster.add("ship", task.ship_type, dest_sys, 1)
+                    events.append({
+                        "type": "ship_built",
+                        "ship_type": task.ship_type,
+                        "location": dest_sys,
+                    })
+
+                if task.complete:
+                    completed.append(task.task_id)
+
+            for tid in completed:
+                gs.shipyard_tasks.remove(loc_id, tid)
 
         return events

@@ -224,6 +224,41 @@ ENERGY_CONSUMPTION: dict[str, float] = {
 }
 
 
+def compute_power_modifier(gs, body_id: str, plant_type_value: str) -> float:
+    """
+    Return an environment + research multiplier for a power plant's output.
+    Solar: inverse-square orbital distance, star luminosity.
+    Wind: atmospheric density by body subtype.
+    Bios: scales with available bios resource.
+    Research: energy_efficiency tech +25%.
+    All others: research bonus only.
+    """
+    env = gs.body_env.get(body_id, {})
+    orbital_radius  = env.get("orbital_radius", 1.0)
+    subtype         = env.get("subtype", "")
+    star_lum        = env.get("star_luminosity", 3.8e26)
+    research_bonus  = 1.25 if "energy_efficiency" in gs.tech.researched else 1.0
+
+    if plant_type_value == "power_plant_solar":
+        ref_lum = 3.8e26  # G-type Sun
+        lum_factor = min(3.0, (star_lum / ref_lum) ** 0.5)
+        dist_factor = lum_factor / max(0.05, orbital_radius ** 2)
+        return min(5.0, max(0.05, dist_factor)) * research_bonus
+
+    if plant_type_value == "power_plant_wind":
+        atm = {"gas_giant": 2.5, "hot_jupiter": 3.0, "terrestrial": 1.0,
+               "super_earth": 1.2, "ice_giant": 0.6}.get(subtype, 0.2)
+        return atm * research_bonus
+
+    if plant_type_value == "power_plant_bios":
+        # Need bios resource — look it up from roster/body
+        # Without galaxy access here we return a neutral 1.0; caller may override
+        return research_bonus
+
+    # Fossil, nuclear, cold fusion, dark matter — stable, just research
+    return research_bonus
+
+
 def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
     """Return (production, consumption) energy-units/yr for a body."""
     roster = gs.entity_roster
@@ -236,7 +271,8 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
                 if st in POWER_PLANT_SPECS:
                     flag_key = f"{body_id}:{inst.type_value}"
                     if gs.power_plant_active.get(flag_key, True):
-                        production += POWER_PLANT_SPECS[st].base_output * inst.count
+                        modifier = compute_power_modifier(gs, body_id, inst.type_value)
+                        production += POWER_PLANT_SPECS[st].base_output * inst.count * modifier
             except ValueError:
                 pass
             cons = ENERGY_CONSUMPTION.get(inst.type_value, 0.0)
@@ -255,6 +291,33 @@ REFINE_RECIPES: dict[str, tuple[dict[str, float], float]] = {
     "electronics": ({"minerals": 20.0, "rare_minerals": 10.0}, 5.0),
     "alloys":      ({"minerals": 30.0},                        8.0),
     "fuel_cells":  ({"gas": 20.0, "ice": 10.0},               5.0),
+}
+
+
+# ---------------------------------------------------------------------------
+# Factory recipes
+# ---------------------------------------------------------------------------
+# Maps recipe_id → (input_costs_per_output_unit, output_per_factory_per_yr, output_resource_field)
+
+FACTORY_RECIPES: dict[str, tuple[dict[str, float], float, str]] = {
+    # recipe_id: (inputs, output_rate/factory/yr, output_resource_field)
+    "alloys":       ({"minerals":       30.0},                     12.0, "alloys"),
+    "electronics":  ({"minerals":       20.0, "rare_minerals": 8.0}, 10.0, "electronics"),
+    "fuel_cells":   ({"gas":            20.0, "ice":         10.0},  8.0, "fuel_cells"),
+    "components":   ({"alloys":          6.0, "electronics":  4.0},  3.0, "components"),
+}
+
+# ---------------------------------------------------------------------------
+# Shipyard build rates
+# ---------------------------------------------------------------------------
+# Maps ship_type → build_time_years_per_ship_per_shipyard
+
+SHIPYARD_BUILD_RATES: dict[str, float] = {
+    "probe":         1.0,   # 1 yr per shipyard
+    "drop_ship":     2.0,
+    "mining_vessel": 2.5,
+    "transport":     3.0,
+    "warship":       5.0,
 }
 
 
