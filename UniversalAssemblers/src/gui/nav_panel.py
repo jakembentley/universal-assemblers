@@ -93,6 +93,8 @@ class NavPanel:
         if not system:
             self._body_list.set_items([])
             return
+        # Preserve scroll position across per-frame rebuilds
+        saved_scroll = self._body_list._scroll
 
         gs = self.app.game_state
 
@@ -149,12 +151,14 @@ class NavPanel:
                 items.append((f"  ◦ {moon_short}{mind}", moon.id, BODY_COLORS["moon"]))
 
         self._body_list.set_items(items)
+        self._body_list._scroll = min(saved_scroll, max(0, len(items) - self._body_list._visible_rows()))
         self._body_list.set_selected(self.app.selected_body_id)
 
     # ------------------------------------------------------------------
     # Public update hooks
 
     def on_system_changed(self) -> None:
+        self._body_list._scroll = 0   # reset when switching systems
         self._rebuild_systems()
         self._rebuild_bodies()
 
