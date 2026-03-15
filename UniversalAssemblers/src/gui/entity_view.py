@@ -53,10 +53,10 @@ _STRUCTURE_NAMES: dict[str, str] = {
 }
 
 _BOT_NAMES: dict[str, str] = {
-    "worker":      "Worker Bot",
-    "harvester":   "Harvester Bot",
-    "miner":       "Miner Bot",
-    "constructor": "Constructor Bot",
+    "logistic_bot": "Logistic Bot",
+    "harvester":    "Harvester Bot",
+    "miner":        "Miner Bot",
+    "constructor":  "Constructor Bot",
 }
 
 _SHIP_NAMES: dict[str, str] = {
@@ -68,8 +68,9 @@ _SHIP_NAMES: dict[str, str] = {
 }
 
 _TASK_TYPE_LABELS: dict[str, str] = {
-    "mine":  "Mine",
-    "build": "Build",
+    "mine":      "Mine",
+    "build":     "Build",
+    "transport": "Transport",
 }
 
 _MINE_RESOURCES = ["minerals", "rare_minerals", "ice", "gas", "bios"]
@@ -83,10 +84,10 @@ _MINE_RES_LABELS = {
 
 # Which task types each bot type is allowed to add
 _BOT_ALLOWED_TASKS: dict[str, list[str]] = {
-    "miner":       ["mine"],
-    "harvester":   ["mine"],
-    "constructor": ["build"],
-    "worker":      ["mine", "build"],
+    "miner":        ["mine"],
+    "harvester":    ["mine"],
+    "constructor":  ["build"],
+    "logistic_bot": ["transport"],
 }
 
 # Buildable entity types for constructor tasks (no tech requirement)
@@ -95,7 +96,7 @@ _BUILD_STRUCTURES_BASE = [
     "power_plant_solar", "power_plant_wind", "power_plant_bios",
     "power_plant_fossil", "power_plant_nuclear", "shipyard", "storage_hub",
 ]
-_BUILD_BOTS = ["miner", "constructor", "worker", "harvester"]
+_BUILD_BOTS = ["miner", "constructor", "logistic_bot", "harvester"]
 _BUILD_SHIPS = ["probe", "drop_ship"]
 
 
@@ -152,6 +153,10 @@ class EntityView:
         self._send_mode:      bool       = False
         self._send_system_id: str | None = None
         self._send_body_id:   str | None = None   # body-level docking target (mining/transport)
+        self._fuel_warning:   bool       = False
+
+        # --- Logistic bot transport UI state ---
+        self._transport_target_body: str | None = None
 
         # Scrollable lists for system and body selectors
         sys_sel_rect = pygame.Rect(
@@ -193,10 +198,12 @@ class EntityView:
         # Default task type based on bot capabilities
         allowed = _BOT_ALLOWED_TASKS.get(type_value, ["mine"])
         self._add_task_type = allowed[0]
-        self._send_mode      = False
-        self._send_system_id = None
-        self._send_body_id   = None
-        self._hit_rects      = []
+        self._send_mode              = False
+        self._send_system_id         = None
+        self._send_body_id           = None
+        self._fuel_warning           = False
+        self._transport_target_body  = None
+        self._hit_rects              = []
 
         if category == "ship":
             self._rebuild_sys_list()
@@ -484,6 +491,9 @@ class EntityView:
         elif action == "set_res":
             self._add_task_res = str(data)
 
+        elif action == "set_transport_target":
+            self._transport_target_body = str(data)
+
         elif action == "inc_amount":
             self._add_task_amount = min(99999, self._add_task_amount + 100)
 
@@ -503,6 +513,14 @@ class EntityView:
                     entity_type=None,
                     target_amount=self._add_task_amount,
                 )
+            elif self._add_task_type == "transport":
+                task = BotTask(
+                    task_type="transport",
+                    resource=self._add_task_res,
+                    entity_type=None,
+                    target_amount=self._add_task_amount,
+                    target_location=self._transport_target_body,
+                )
             else:
                 task = BotTask(
                     task_type="build",
@@ -512,6 +530,7 @@ class EntityView:
                 )
             gs.bot_tasks.add(loc, self._type_value, task)
             self._add_task_mode = False
+            self._transport_target_body = None
 
         elif action == "remove_task":
             task_id = str(data)
@@ -560,6 +579,31 @@ class EntityView:
         )
         if count == 0:
             return
+
+        # Fuel cell check
+        from ..models.entity import SHIP_FUEL_COSTS
+        fuel_cost = SHIP_FUEL_COSTS.get(self._type_value, 0.0)
+        if fuel_cost > 0:
+            home_sys = next((s for s in galaxy.solar_systems if s.id == self._system_id), None)
+            if home_sys:
+                fueled = False
+                for body in home_sys.orbital_bodies:
+                    if body.resources.fuel_cells >= fuel_cost:
+                        body.resources.fuel_cells -= fuel_cost
+                        fueled = True
+                        break
+                    if not fueled:
+                        for moon in body.moons:
+                            if moon.resources.fuel_cells >= fuel_cost:
+                                moon.resources.fuel_cells -= fuel_cost
+                                fueled = True
+                                break
+                    if fueled:
+                        break
+                if not fueled:
+                    self._fuel_warning = True
+                    return
+        self._fuel_warning = False
 
         # Determine target body
         target_sys = next(
@@ -807,6 +851,39 @@ class EntityView:
 
         # Shipyard build queue
         if self._type_value == "shipyard" and gs:
+            # Fuel Depot section
+            cy += 4
+            if cy < self._rect.bottom:
+                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
+                fd_lbl = font(11, bold=True).render("FUEL DEPOT", True, (255, 200, 80))
+                surface.blit(fd_lbl, (cx, cy + 3))
+            cy += 18
+            # Show available fuel_cells at this body
+            fuel_avail = 0.0
+            if gs.galaxy and loc:
+                for sys in gs.galaxy.solar_systems:
+                    for body in sys.orbital_bodies:
+                        if body.id == loc:
+                            fuel_avail = body.resources.fuel_cells
+                        for moon in body.moons:
+                            if moon.id == loc:
+                                fuel_avail = moon.resources.fuel_cells
+            fa_s = font(11).render(f"Available: {fuel_avail:.1f} fuel_cells", True, C_TEXT)
+            if cy < self._rect.bottom:
+                surface.blit(fa_s, (cx, cy))
+            cy += 16
+            from ..models.entity import SHIP_FUEL_COSTS
+            for stype, fcost in SHIP_FUEL_COSTS.items():
+                if cy >= self._rect.bottom:
+                    break
+                fc_row = font(10).render(
+                    f"  {stype.replace('_',' ').title()}: {fcost:.0f} fuel_cells",
+                    True, C_TEXT_DIM
+                )
+                surface.blit(fc_row, (cx, cy))
+                cy += 14
+            cy += 4
+
             tasks = gs.shipyard_tasks.get(loc or "")
             cy += 4
             if cy < self._rect.bottom:
@@ -1036,6 +1113,19 @@ class EntityView:
                     desc = f"MINE  {task.resource or '?'}"
                     progress_frac = min(1.0, task.progress / max(1, task.target_amount))
                     prog_str = f"{task.progress:,.0f} / {task.target_amount:,.0f}"
+                elif task.task_type == "transport":
+                    dest_name = task.target_location or "?"
+                    if self.app.galaxy and task.target_location:
+                        for sys in self.app.galaxy.solar_systems:
+                            for body in sys.orbital_bodies:
+                                if body.id == task.target_location:
+                                    dest_name = body.name
+                                for moon in body.moons:
+                                    if moon.id == task.target_location:
+                                        dest_name = moon.name
+                    desc = f"TRANSPORT  {task.resource or '?'} → {dest_name}"
+                    progress_frac = min(1.0, task.progress / max(1, task.target_amount))
+                    prog_str = f"{task.progress:,.0f} / {task.target_amount:,.0f}"
                 else:
                     desc = f"BUILD  {(task.entity_type or '?').replace('_', ' ').title()}"
                     progress_frac = min(1.0, task.built_count / max(1, task.target_amount))
@@ -1112,6 +1202,18 @@ class EntityView:
         if len(allowed_types) > 1:
             form_h += 30   # task type toggle row
         form_h += 60       # resource / entity grid (2 rows max)
+        if self._add_task_type == "transport":
+            # destination body selector: label + up to 4 rows of 2 bodies each
+            form_h += 22   # label
+            sys_obj = self.app.selected_system
+            body_count = 0
+            if sys_obj:
+                current_loc = self._body_id or self._system_id or ""
+                for body in sys_obj.orbital_bodies:
+                    if body.id != current_loc:
+                        body_count += 1
+                    body_count += sum(1 for moon in body.moons if moon.id != current_loc)
+            form_h += ((body_count + 1) // 2) * 24 + 4
         form_h += 30       # amount row
         if self._add_task_type == "build":
             form_h += 20   # cost line
@@ -1126,11 +1228,11 @@ class EntityView:
 
         # Task type toggle — only shown if the bot can do more than one type
         if len(allowed_types) > 1:
-            all_types = [("mine", "Mine"), ("build", "Build")]
+            all_types = [("mine", "Mine"), ("build", "Build"), ("transport", "Transport")]
             for i, (ttype, tlabel) in enumerate(
-                (t for t in all_types if t[0] in allowed_types)
+                t for t in all_types if t[0] in allowed_types
             ):
-                tr = pygame.Rect(fx + i * 80, fy, 72, 22)
+                tr = pygame.Rect(fx + i * 90, fy, 82, 22)
                 sel = self._add_task_type == ttype
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tr, border_radius=3)
                 lbl = font(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT)
@@ -1139,7 +1241,7 @@ class EntityView:
             fy += 30
 
         # Resource / entity type selector
-        if self._add_task_type == "mine":
+        if self._add_task_type == "mine" or self._add_task_type == "transport":
             for i, res in enumerate(_MINE_RESOURCES):
                 rr = pygame.Rect(fx + (i % 3) * 90, fy + (i // 3) * 26, 82, 22)
                 sel = self._add_task_res == res
@@ -1150,6 +1252,34 @@ class EntityView:
                 surface.blit(rlbl, rlbl.get_rect(center=rr.center))
                 self._hit_rects.append((rr, "set_res", res))
             fy += ((len(_MINE_RESOURCES) - 1) // 3 + 1) * 26 + 4
+
+            # For transport: show destination body selector
+            if self._add_task_type == "transport":
+                dest_lbl = font(11, bold=True).render("Destination:", True, C_TEXT_DIM)
+                surface.blit(dest_lbl, (fx, fy))
+                fy += 18
+                # Get bodies in current system, excluding current location
+                dest_bodies: list[tuple[str, str]] = []
+                current_loc = self._body_id or self._system_id or ""
+                sys_obj = self.app.selected_system
+                if sys_obj:
+                    for body in sys_obj.orbital_bodies:
+                        if body.id != current_loc:
+                            dest_bodies.append((body.name, body.id))
+                        for moon in body.moons:
+                            if moon.id != current_loc:
+                                dest_bodies.append((f"↳ {moon.name}", moon.id))
+                for i, (bname, bid) in enumerate(dest_bodies):
+                    br = pygame.Rect(fx + (i % 2) * 140, fy + (i // 2) * 24, 132, 20)
+                    sel = self._transport_target_body == bid
+                    pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, br, border_radius=3)
+                    blbl = font(9, bold=True).render(
+                        bname[:16], True, (0, 0, 0) if sel else C_BTN_TXT
+                    )
+                    surface.blit(blbl, blbl.get_rect(center=br.center))
+                    self._hit_rects.append((br, "set_transport_target", bid))
+                rows = (len(dest_bodies) + 1) // 2
+                fy += rows * 24 + 4
         else:
             # Show structures then bots in a grid
             gs = self.app.game_state
@@ -1172,10 +1302,10 @@ class EntityView:
         pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
         surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
         surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
-        target = self._add_task_amount if self._add_task_type == "mine" else max(1, self._add_task_amount // 100)
+        target = self._add_task_amount if self._add_task_type in ("mine", "transport") else max(1, self._add_task_amount // 100)
         amt_s = font(12, bold=True).render(str(target), True, C_SELECTED)
         surface.blit(amt_s, (fx + 34, fy + 3))
-        unit_lbl = "units" if self._add_task_type == "mine" else "units to build"
+        unit_lbl = "units" if self._add_task_type in ("mine", "transport") else "units to build"
         amt_lbl = font(11).render(unit_lbl, True, C_TEXT_DIM)
         surface.blit(amt_lbl, (fx + 120, fy + 4))
         self._hit_rects.append((dec_r, "dec_amount", None))
@@ -1308,6 +1438,21 @@ class EntityView:
         # Dispatch panel — available for ALL ship types when ships are present
         if count > 0:
             cy += 8
+            # Fuel cost info
+            from ..models.entity import SHIP_FUEL_COSTS
+            fuel_cost = SHIP_FUEL_COSTS.get(self._type_value, 0.0)
+            if fuel_cost > 0:
+                fc_s = font(11).render(f"⛽ Cost: {fuel_cost:.0f} fuel_cells per dispatch",
+                                       True, C_TEXT_DIM)
+                surface.blit(fc_s, (cx, cy))
+                cy += 16
+            # Fuel warning
+            if self._fuel_warning and not self._send_mode:
+                fw_s = font(11, bold=True).render(
+                    "⚠ Insufficient fuel_cells for dispatch", True, C_WARN
+                )
+                surface.blit(fw_s, (cx, cy))
+                cy += 16
             send_btn_r = pygame.Rect(cx, cy, 170, 28)
             pygame.draw.rect(surface, C_BTN_HOV if self._send_mode else C_BTN,
                              send_btn_r, border_radius=4)

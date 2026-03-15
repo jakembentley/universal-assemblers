@@ -26,18 +26,21 @@ if TYPE_CHECKING:
 @dataclass
 class BotTask:
     """One assigned task for a bot type at a location."""
-    task_type:    str           # "mine" | "build"
-    resource:     str | None    # mine: "minerals"|"rare_minerals"|"ice"|"gas"|"bios"
-    entity_type:  str | None    # build: entity type_value (e.g. "factory", "miner")
-    target_amount: int          # units to mine OR entities to build
-    progress:     float = 0.0   # accumulated progress (units extracted / build fraction)
-    built_count:  int   = 0     # for build tasks: how many entities completed so far
-    allocation:   int   = 10    # 0–100 % of bot time devoted to this task
-    task_id:      str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+    task_type:       str           # "mine" | "build" | "transport"
+    resource:        str | None    # mine/transport: "minerals"|"rare_minerals"|"ice"|"gas"|"bios"
+    entity_type:     str | None    # build: entity type_value (e.g. "factory", "miner")
+    target_amount:   int           # units to mine/transport OR entities to build
+    progress:        float = 0.0   # accumulated progress (units extracted / build fraction)
+    built_count:     int   = 0     # for build tasks: how many entities completed so far
+    allocation:      int   = 10    # 0–100 % of bot time devoted to this task
+    task_id:         str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+    target_location: str | None = None  # transport: destination body_id
 
     @property
     def complete(self) -> bool:
         if self.task_type == "mine":
+            return self.progress >= self.target_amount
+        if self.task_type == "transport":
             return self.progress >= self.target_amount
         return self.built_count >= self.target_amount
 
@@ -87,6 +90,45 @@ class BotTaskList:
             loc, btype = k.rsplit(":", 1)
             result.append((loc, btype))
         return result
+
+    def to_dict(self) -> dict:
+        result = {}
+        for k, tasks in self._tasks.items():
+            result[k] = [
+                {
+                    "task_type":       t.task_type,
+                    "resource":        t.resource,
+                    "entity_type":     t.entity_type,
+                    "target_amount":   t.target_amount,
+                    "progress":        t.progress,
+                    "built_count":     t.built_count,
+                    "allocation":      t.allocation,
+                    "task_id":         t.task_id,
+                    "target_location": t.target_location,
+                }
+                for t in tasks
+            ]
+        return result
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BotTaskList":
+        import uuid as _u
+        btl = cls()
+        for k, tasks in d.items():
+            loc, btype = k.rsplit(":", 1)
+            for td in tasks:
+                btl.add(loc, btype, BotTask(
+                    task_type=td["task_type"],
+                    resource=td.get("resource"),
+                    entity_type=td.get("entity_type"),
+                    target_amount=td.get("target_amount", 0),
+                    progress=td.get("progress", 0.0),
+                    built_count=td.get("built_count", 0),
+                    allocation=td.get("allocation", 10),
+                    task_id=td.get("task_id", _u.uuid4().hex[:8]),
+                    target_location=td.get("target_location"),
+                ))
+        return btl
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +293,7 @@ class DiscoveryState(Enum):
 class EntityInstance:
     """One stack of identical entities at a single location."""
     category: str    # "structure" | "bot" | "ship" | "bio"
-    type_value: str  # e.g. "factory", "probe", "worker"
+    type_value: str  # e.g. "factory", "probe", "logistic_bot"
     location_id: str # system_id (ships/orbital) or body_id (surface structures/bots)
     count: int = 1
 
@@ -617,6 +659,7 @@ class GameState:
             "extractor_refine_mode": dict(self.extractor_refine_mode),
             "factory_tasks":        self.factory_tasks.to_dict(),
             "shipyard_tasks":       self.shipyard_tasks.to_dict(),
+            "bot_tasks":            self.bot_tasks.to_dict(),
         }
 
     @classmethod
@@ -635,6 +678,7 @@ class GameState:
         gs.extractor_refine_mode = dict(d.get("extractor_refine_mode", {}))
         gs.factory_tasks  = FactoryTaskList.from_dict(d.get("factory_tasks", {}))
         gs.shipyard_tasks = ShipyardTaskList.from_dict(d.get("shipyard_tasks", {}))
+        gs.bot_tasks      = BotTaskList.from_dict(d.get("bot_tasks", {}))
 
         gs._init_bio_state()
 

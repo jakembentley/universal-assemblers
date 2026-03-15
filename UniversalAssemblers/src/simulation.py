@@ -156,14 +156,13 @@ class OrderQueue:
 # ---------------------------------------------------------------------------
 
 _MINE_RATES: dict[str, float] = {
-    "miner":     10.0,   # resource-units / yr / bot at 100% allocation
-    "harvester": 15.0,
-    "worker":     5.0,
+    "miner":        10.0,   # resource-units / yr / bot at 100% allocation
+    "harvester":    15.0,
+    "logistic_bot":  5.0,   # fallback rate (primary role is transport)
 }
 
 _BUILD_RATES: dict[str, float] = {
     "constructor": 1.0,  # entities / yr / bot at 100% allocation
-    "worker":      0.5,
 }
 
 # Ship type_values that constructors can build
@@ -227,6 +226,10 @@ class SimulationEngine:
             for inst in roster.by_category("structure"):
                 if inst.type_value != struct_type.value:
                     continue
+                flag_key = f"{inst.location_id}:{struct_type.value}"
+                # Skip if already deactivated
+                if not self.gs.power_plant_active.get(flag_key, True):
+                    continue
                 body = body_map.get(inst.location_id)
                 if not body:
                     continue
@@ -236,10 +239,17 @@ class SimulationEngine:
                 new_val = max(0.0, current - consumed)
                 setattr(res, spec.input_resource, new_val)
                 if current > 0 and new_val == 0.0:
+                    # Auto-deactivate the plant
+                    self.gs.power_plant_active[flag_key] = False
                     events.append({
                         "type": "resource_depleted",
                         "resource": spec.input_resource,
                         "location_id": inst.location_id,
+                    })
+                    events.append({
+                        "type": "resource_depleted_plant",
+                        "location_id": inst.location_id,
+                        "plant_type": struct_type.value,
                     })
         return events
 
@@ -358,7 +368,7 @@ class SimulationEngine:
 
     def _tick_extractors(self, dt_years: float) -> None:
         """Refine base resources into manufactured goods when extractor refine mode is on."""
-        from .models.entity import REFINE_RECIPES
+        from .models.entity import REFINE_RECIPES, compute_energy_balance
         gs     = self.gs
         galaxy = gs.galaxy
         if not galaxy:
@@ -381,8 +391,13 @@ class SimulationEngine:
             if not body:
                 continue
             res = body.resources  # type: ignore[attr-defined]
+
+            # Power throttle
+            prod, cons = compute_energy_balance(gs, inst.location_id)
+            throttle = min(1.0, prod / max(cons, 1.0)) if cons > 0 else 1.0
+
             for out_res, (costs, rate_per_extractor) in REFINE_RECIPES.items():
-                output_amount = rate_per_extractor * inst.count * dt_years
+                output_amount = rate_per_extractor * inst.count * throttle * dt_years
                 # Check and consume inputs
                 if not all(getattr(res, r, 0.0) >= amt * output_amount / rate_per_extractor
                            for r, amt in costs.items()):
@@ -453,6 +468,25 @@ class SimulationEngine:
                             task.progress += actual
                     else:
                         task.progress += mined
+
+                elif task.task_type == "transport":
+                    # Move resources from loc_id to task.target_location
+                    if not task.target_location or not body:
+                        continue
+                    target_body = body_map.get(task.target_location)
+                    if not target_body:
+                        continue
+                    TRANSPORT_RATE = 50.0  # resource-units/yr per logistic bot at 100%
+                    move_amount = TRANSPORT_RATE * effective_bots * throttle * dt_years
+                    res_src = body.resources  # type: ignore[attr-defined]
+                    res_dst = target_body.resources  # type: ignore[attr-defined]
+                    resource = task.resource or "minerals"
+                    available = getattr(res_src, resource, 0.0)
+                    actual = min(move_amount, available)
+                    if actual > 0:
+                        setattr(res_src, resource, available - actual)
+                        setattr(res_dst, resource, getattr(res_dst, resource, 0.0) + actual)
+                        task.progress += actual
 
                 elif task.task_type == "build":
                     rate           = _BUILD_RATES.get(bot_type, 0.25)

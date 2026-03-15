@@ -19,6 +19,7 @@ from .game_clock import GameClock
 from .pause_menu import PauseMenu
 from .entity_view import EntityView
 from .tech_view import TechView
+from .energy_view import EnergyView
 from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
@@ -48,6 +49,7 @@ class App:
         self.pause_menu     = PauseMenu(self)
         self.entity_view    = EntityView(self)
         self.tech_view      = TechView(self)
+        self.energy_view    = EnergyView(self)
         self.new_game_panel = NewGamePanel(self)
 
         # Toast notifications: each entry is (message, expiry_ms, color)
@@ -120,10 +122,19 @@ class App:
 
     def open_tech_view(self) -> None:
         self.entity_view.deactivate()
+        self.energy_view.deactivate()
         self.tech_view.activate()
 
     def close_tech_view(self) -> None:
         self.tech_view.deactivate()
+
+    def open_energy_view(self) -> None:
+        self.entity_view.deactivate()
+        self.tech_view.deactivate()
+        self.energy_view.activate()
+
+    def close_energy_view(self) -> None:
+        self.energy_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -243,6 +254,7 @@ class App:
         self.pause_menu  = PauseMenu(self)
         self.entity_view = EntityView(self)
         self.tech_view   = TechView(self)
+        self.energy_view = EnergyView(self)
         if self.galaxy_view:
             self.galaxy_view = GalaxyView(self)
         if self.game_view:
@@ -291,6 +303,21 @@ class App:
                 res = (ev.get("resource") or "").replace("_", " ").title()
                 msg = f"RESOURCE DEPLETED: {res}"
                 col = (255, 80, 80)
+            elif etype == "resource_depleted_plant":
+                plant_type = (ev.get("plant_type") or "").replace("_", " ").title()
+                loc_id = ev.get("location_id") or "?"
+                # Try to get a friendly name for the location
+                loc_name = loc_id
+                if self.galaxy:
+                    for sys in self.galaxy.solar_systems:
+                        for body in sys.orbital_bodies:
+                            if body.id == loc_id:
+                                loc_name = body.name
+                            for moon in body.moons:
+                                if moon.id == loc_id:
+                                    loc_name = moon.name
+                msg = f"⚡ {plant_type} offline — fuel depleted at {loc_name}"
+                col = (255, 160, 40)
             else:
                 continue
             self._notifications.append((msg, now + TTL, col))
@@ -337,7 +364,9 @@ class App:
                     self.quit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.tech_view.is_active:
+                        if self.energy_view.is_active:
+                            self.close_energy_view()
+                        elif self.tech_view.is_active:
                             self.close_tech_view()
                         elif self.entity_view.is_active:
                             self.close_entity_view()
@@ -371,11 +400,13 @@ class App:
                 self.new_game_panel.handle_events(events)
                 self.new_game_panel.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
-                if not self.pause_menu.is_active and not self.tech_view.is_active:
+                if not self.pause_menu.is_active and not self.tech_view.is_active \
+                        and not self.energy_view.is_active:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
-                if not self.pause_menu.is_active and not self.tech_view.is_active:
+                if not self.pause_menu.is_active and not self.tech_view.is_active \
+                        and not self.energy_view.is_active:
                     self.game_view.handle_events(events)
                 self.game_view.draw(self.screen)
 
@@ -391,5 +422,10 @@ class App:
             if self.tech_view.is_active:
                 self.tech_view.handle_events(events)
                 self.tech_view.draw(self.screen)
+
+            # Energy overview overlay
+            if self.energy_view.is_active:
+                self.energy_view.handle_events(events)
+                self.energy_view.draw(self.screen)
 
             pygame.display.flip()

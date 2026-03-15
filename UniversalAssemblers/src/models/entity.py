@@ -45,10 +45,10 @@ class MegastructureType(str, Enum):
 # ---------------------------------------------------------------------------
 
 class BotType(str, Enum):
-    WORKER      = "worker"
-    HARVESTER   = "harvester"
-    MINER       = "miner"
-    CONSTRUCTOR = "constructor"
+    LOGISTIC_BOT = "logistic_bot"
+    HARVESTER    = "harvester"
+    MINER        = "miner"
+    CONSTRUCTOR  = "constructor"
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ BUILD_COSTS: dict[str, dict[str, float]] = {
     # Bots
     "miner":                   {"minerals": 20,  "rare_minerals": 5},
     "constructor":             {"minerals": 20,  "rare_minerals": 5},
-    "worker":                  {"minerals": 15,  "rare_minerals": 2},
+    "logistic_bot":            {"minerals": 15,  "rare_minerals": 2},
     "harvester":               {"minerals": 25,  "rare_minerals": 5},
 }
 
@@ -219,7 +219,7 @@ ENERGY_CONSUMPTION: dict[str, float] = {
     "replicator":              60.0,
     "miner":                    5.0,
     "constructor":              5.0,
-    "worker":                   3.0,
+    "logistic_bot":             3.0,
     "harvester":                4.0,
 }
 
@@ -306,6 +306,20 @@ FACTORY_RECIPES: dict[str, tuple[dict[str, float], float, str]] = {
     "fuel_cells":   ({"gas":            20.0, "ice":         10.0},  8.0, "fuel_cells"),
     "components":   ({"alloys":          6.0, "electronics":  4.0},  3.0, "components"),
 }
+
+# ---------------------------------------------------------------------------
+# Ship fuel costs
+# ---------------------------------------------------------------------------
+# fuel_cells consumed per dispatch
+
+SHIP_FUEL_COSTS: dict[str, float] = {
+    "probe":          2.0,
+    "drop_ship":      8.0,
+    "mining_vessel":  5.0,
+    "transport":      6.0,
+    "warship":        10.0,
+}
+
 
 # ---------------------------------------------------------------------------
 # Shipyard build rates

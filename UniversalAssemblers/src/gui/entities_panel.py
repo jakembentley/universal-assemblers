@@ -40,10 +40,10 @@ _STRUCTURE_TYPES: list[tuple[str, str, str]] = [
 ]
 
 _BOT_TYPES: list[tuple[str, str, str]] = [
-    ("worker",      "Worker Bot",  "◈"),
-    ("harvester",   "Harvester",   "◈"),
-    ("miner",       "Miner Bot",   "◈"),
-    ("constructor", "Constructor", "◈"),
+    ("logistic_bot", "Logistic Bot", "◈"),
+    ("harvester",    "Harvester",    "◈"),
+    ("miner",        "Miner Bot",    "◈"),
+    ("constructor",  "Constructor",  "◈"),
 ]
 
 _SHIP_TYPES: list[tuple[str, str, str]] = [

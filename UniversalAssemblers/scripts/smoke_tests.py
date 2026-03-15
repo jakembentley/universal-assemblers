@@ -15,6 +15,7 @@ import src.game_state
 import src.generator
 import src.gui.app
 import src.gui.constants
+import src.gui.energy_view
 import src.gui.entities_panel
 import src.gui.entity_view
 import src.gui.galaxy_view

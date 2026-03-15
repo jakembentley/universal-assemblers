@@ -40,6 +40,12 @@ class TaskBar:
             callback=self._open_tech,
             font_size=11,
         )
+        self._energy_btn = Button(
+            (8 + bw + 8 + 110 + 8, by, 90, bh),
+            "⚡ ENERGY",
+            callback=self._open_energy,
+            font_size=11,
+        )
 
     # ------------------------------------------------------------------
 
@@ -50,12 +56,16 @@ class TaskBar:
     def _open_tech(self) -> None:
         self.app.open_tech_view()
 
+    def _open_energy(self) -> None:
+        self.app.open_energy_view()
+
     # ------------------------------------------------------------------
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
             self._galaxy_btn.handle_event(event)
             self._tech_btn.handle_event(event)
+            self._energy_btn.handle_event(event)
 
     def draw(self, surface: pygame.Surface) -> None:
         W = _c.WINDOW_WIDTH
@@ -65,11 +75,12 @@ class TaskBar:
 
         self._galaxy_btn.draw(surface)
         self._tech_btn.draw(surface)
+        self._energy_btn.draw(surface)
 
         # Centre: current system / body breadcrumb
         label_text = self._build_label()
         if label_text:
-            btn_right = 8 + 120 + 8 + 110 + 16
+            btn_right = 8 + 120 + 8 + 110 + 8 + 90 + 16
             usable_cx = btn_right + (W - _CLOCK_RESERVE - btn_right) // 2
             lbl = font(13, bold=True).render(label_text, True, C_ACCENT)
             surface.blit(lbl, lbl.get_rect(center=(usable_cx, TASKBAR_H // 2)))
