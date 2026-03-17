@@ -58,7 +58,31 @@ print('Fallback smoke test passed.')
   fi
 fi
 
-# ── 3. Stage source files only, commit, push ─────────────────────────────────
+# ── 3. Build validation — verify all key src/ imports load cleanly ───────────
+echo "[hook] Checking imports..."
+cd "$PROJECT_DIR" || exit 1
+IMPORT_OUTPUT=$(
+  "$PYTHON" -c "
+from src.gui.app import App
+from src.simulation import SimulationEngine
+from src.game_state import GameState
+from src.generator import MapGenerator
+from src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS
+from src.models.tech import TECH_TREE
+print('All imports OK')
+" 2>&1
+)
+IMPORT_CODE=$?
+if [ $IMPORT_CODE -ne 0 ]; then
+  echo "[hook] Import check FAILED — build.bat would break. Aborting push."
+  echo "$IMPORT_OUTPUT"
+  exit 1
+fi
+echo "[hook] $IMPORT_OUTPUT"
+
+cd "$REPO" || exit 1
+
+# ── 4. Stage source files only, commit, push ─────────────────────────────────
 cd "$REPO" || exit 1
 
 git add "${PROJECT}/" \
