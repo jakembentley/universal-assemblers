@@ -624,6 +624,7 @@ class EntityView:
                         break
                 if not fueled:
                     self._fuel_warning = True
+                    self._send_mode = False   # exit send mode so warning is visible
                     return
         self._fuel_warning = False
 
