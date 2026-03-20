@@ -722,6 +722,8 @@ class SimulationEngine:
                 order.progress             = 0.0
                 order.current_waypoint_idx = next_idx
                 oq.enqueue(next_sys_id, ship_type, order)
+                # Passing through a system reveals it
+                self.gs.discover_system(next_sys_id)
                 continue
 
             # Final leg complete — arrived at destination
