@@ -463,6 +463,8 @@ class GameState:
         self.order_queue: OrderQueue = OrderQueue()
         self.sim_engine: SimulationEngine = SimulationEngine(self)
         self._sim_events: list = []   # most-recent tick's events, for UI polling
+        self._ledger: list = []       # persistent LedgerEntry list, newest-first
+        self._LEDGER_MAX: int = 500
         self.probed_systems: set[str] = set()   # systems a probe has visited
         # power_plant_active: key = f"{body_id}:{type_value}", default True
         self.power_plant_active: dict[str, bool] = {}
@@ -588,12 +590,48 @@ class GameState:
         """Advance the non-player simulation. Called every game frame when unpaused."""
         self.in_game_years += dt_years
         self._sim_events = self.sim_engine.tick(dt_years)
+        self._ingest_events_to_ledger(self._sim_events)
 
     def pop_sim_events(self) -> list:
         """Return and clear the most-recent sim events (for UI notification)."""
         events = list(self._sim_events)
         self._sim_events = []
         return events
+
+    def _ingest_events_to_ledger(self, events: list) -> None:
+        """Convert raw sim events into LedgerEntry records and prepend to _ledger."""
+        from .models.ledger import LedgerEntry, format_ledger_event
+        new_entries: list[LedgerEntry] = []
+        for ev in events:
+            result = format_ledger_event(ev, self.body_env, self.galaxy)
+            if result is None:
+                continue
+            msg, color, category, system_id = result
+            # Visibility check: system-level events (system_id=None) always visible;
+            # location-specific events only if system is probed.
+            if system_id is not None and system_id not in self.probed_systems:
+                continue
+            new_entries.append(LedgerEntry(
+                tick_year=self.in_game_years,
+                category=category,
+                event_type=ev.get("type", ""),
+                message=msg,
+                color=color,
+                system_id=system_id,
+            ))
+        if new_entries:
+            self._ledger = new_entries + self._ledger
+            self._ledger = self._ledger[:self._LEDGER_MAX]
+
+    def get_ledger(self, filter_category: str | None = None) -> list:
+        """Return visible ledger entries, optionally filtered by category."""
+        entries = [
+            e for e in self._ledger
+            if e.system_id is None or e.system_id in self.probed_systems
+        ]
+        if filter_category:
+            entries = [e for e in entries if e.category == filter_category]
+        return entries
 
     # ------------------------------------------------------------------
     # Entity damage
