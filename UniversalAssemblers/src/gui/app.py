@@ -58,6 +58,7 @@ class App:
 
         # Toast notifications: each entry is (message, expiry_ms, color)
         self._notifications: deque = deque(maxlen=5)
+        self._victory_state: str | None = None   # set when a victory condition triggers
 
     # ------------------------------------------------------------------
     # Galaxy / selection accessors
@@ -184,30 +185,60 @@ class App:
         self.game_clock  = GameClock()
         self.state       = "galaxy"
 
-    def save_game(self) -> None:
+    def save_game(self, slot: int = -1) -> None:
+        """Save game. slot=-1 → quicksave, slot=0-2 → autosave ring buffer."""
         if not self.galaxy or not self.game_state:
             return
         os.makedirs("maps", exist_ok=True)
-        MapGenerator.save(self.galaxy, "maps/quicksave_galaxy.json")
+        from ..generator import MapGenerator as _MG
+        if slot == -1:
+            galaxy_file = "maps/quicksave_galaxy.json"
+            save_file   = "maps/quicksave.json"
+        else:
+            galaxy_file = f"maps/autosave_{slot}_galaxy.json"
+            save_file   = f"maps/autosave_{slot}.json"
+        _MG.save(self.galaxy, galaxy_file)
         gs_data = self.game_state.to_dict()
-        gs_data["galaxy_file"] = "maps/quicksave_galaxy.json"
-        with open("maps/quicksave.json", "w", encoding="utf-8") as fh:
+        gs_data["galaxy_file"] = galaxy_file
+        with open(save_file, "w", encoding="utf-8") as fh:
             json.dump(gs_data, fh, indent=2)
-        print("[save_game] Saved to maps/quicksave.json + quicksave_galaxy.json")
+
+    def _quickload(self) -> None:
+        path = "maps/quicksave.json"
+        if not os.path.exists(path):
+            now = pygame.time.get_ticks()
+            self._notifications.append(("No quicksave found", now + 3000, (255, 80, 80)))
+            return
+        self._load_from_path(path)
+
+    def _autosave(self) -> None:
+        """Rolling 3-slot autosave ring buffer."""
+        slot_path = "maps/autosave_slot.txt"
+        try:
+            slot = int(open(slot_path).read().strip()) if os.path.exists(slot_path) else 0
+        except Exception:
+            slot = 0
+        slot = slot % 3
+        self.save_game(slot=slot)
+        with open(slot_path, "w") as fh:
+            fh.write(str((slot + 1) % 3))
 
     def load_game(self) -> None:
         path = self._open_file_dialog()
         if not path:
             return
+        self._load_from_path(path)
+
+    def _load_from_path(self, path: str) -> None:
+        """Load a save file from a given path (used by load_game and quickload)."""
         try:
             with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
 
-            if data.get("version") == 1:
+            if "galaxy_file" in data:
                 # Full save: load galaxy from companion file
                 galaxy_file = data.get("galaxy_file", "")
                 if not os.path.isabs(galaxy_file):
-                    # Resolve relative to the save file's directory
                     galaxy_file = os.path.join(os.path.dirname(path), galaxy_file)
                 if not os.path.exists(galaxy_file):
                     raise FileNotFoundError(f"Galaxy file not found: {galaxy_file}")
@@ -231,6 +262,7 @@ class App:
         self.game_clock             = GameClock()
         self.pause_menu.is_active   = False
         self.pause_menu._sub_active = False
+        self._victory_state         = None
         self.state                  = "galaxy"
 
     def exit_to_menu(self) -> None:
@@ -279,6 +311,8 @@ class App:
             self.game_view = GameView(self)
 
     def quit(self) -> None:
+        if self.galaxy and self.game_state:
+            self._autosave()
         pygame.quit()
         sys.exit()
 
@@ -336,6 +370,23 @@ class App:
                                     loc_name = moon.name
                 msg = f"⚡ {plant_type} offline — fuel depleted at {loc_name}"
                 col = (255, 160, 40)
+            elif etype == "bios_attack":
+                body_id = ev.get("body_id", "")
+                loc_name = body_id
+                if self.galaxy:
+                    for sys in self.galaxy.solar_systems:
+                        for body in sys.orbital_bodies:
+                            if body.id == body_id:
+                                loc_name = body.name
+                            for moon in body.moons:
+                                if moon.id == body_id:
+                                    loc_name = moon.name
+                msg = f"⚠ Uplifted Bios damaged Extractor at {loc_name}"
+                col = (255, 80, 80)
+            elif etype == "victory":
+                vtype = ev.get("victory_type", "unknown")
+                self._victory_state = vtype
+                continue
             else:
                 continue
             self._notifications.append((msg, now + TTL, col))
@@ -367,6 +418,58 @@ class App:
             surface.blit(surf, (x - w + pad, y + pad))
             pygame.draw.rect(surface, (*col, alpha), pygame.Rect(x - w, y, w, h), 1)
             y += h + 4
+
+    def _draw_victory_overlay(self, surface: pygame.Surface) -> None:
+        """Full-screen victory overlay shown when a win condition triggers."""
+        from .constants import font as _font, WINDOW_WIDTH, WINDOW_HEIGHT
+        # Dim background
+        dim = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 200))
+        surface.blit(dim, (0, 0))
+
+        cx = WINDOW_WIDTH  // 2
+        cy = WINDOW_HEIGHT // 2
+
+        _VICTORY_LABELS = {
+            "domination":  ("DOMINATION VICTORY",  "You have colonised 60% of the known galaxy."),
+            "construction": ("CONSTRUCTION VICTORY", "The Doom Machine is complete."),
+            "technology":  ("TECHNOLOGY VICTORY",   "All technologies have been researched."),
+        }
+        title_txt, sub_txt = _VICTORY_LABELS.get(
+            self._victory_state or "",
+            ("VICTORY", "You have won!")
+        )
+
+        # Title
+        title_s = _font(36, bold=True).render(title_txt, True, (255, 220, 80))
+        surface.blit(title_s, title_s.get_rect(center=(cx, cy - 60)))
+
+        # Subtitle
+        sub_s = _font(18).render(sub_txt, True, (200, 200, 220))
+        surface.blit(sub_s, sub_s.get_rect(center=(cx, cy - 15)))
+
+        # Buttons
+        cont_r = pygame.Rect(cx - 175, cy + 30, 150, 42)
+        new_r  = pygame.Rect(cx + 25,  cy + 30, 150, 42)
+        pygame.draw.rect(surface, (40, 100, 60), cont_r, border_radius=6)
+        pygame.draw.rect(surface, (80, 30, 30),  new_r,  border_radius=6)
+        pygame.draw.rect(surface, (100, 180, 120), cont_r, width=2, border_radius=6)
+        pygame.draw.rect(surface, (180, 80,  80),  new_r,  width=2, border_radius=6)
+        cont_lbl = _font(14, bold=True).render("CONTINUE", True, (200, 255, 220))
+        new_lbl  = _font(14, bold=True).render("NEW GAME",  True, (255, 180, 180))
+        surface.blit(cont_lbl, cont_lbl.get_rect(center=cont_r.center))
+        surface.blit(new_lbl,  new_lbl.get_rect(center=new_r.center))
+
+        # Handle click
+        for event in pygame.event.peek([pygame.MOUSEBUTTONDOWN]):
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if cont_r.collidepoint(event.pos):
+                    self._victory_state = None
+                    pygame.event.clear([pygame.MOUSEBUTTONDOWN])
+                elif new_r.collidepoint(event.pos):
+                    self._victory_state = None
+                    self.exit_to_menu()
+                    pygame.event.clear([pygame.MOUSEBUTTONDOWN])
 
     # ------------------------------------------------------------------
     # Main loop
@@ -400,6 +503,14 @@ class App:
                     if event.key == pygame.K_SPACE:
                         if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
                             self.game_clock.toggle_pause()
+                    if event.key == pygame.K_F5:
+                        if self.state in ("galaxy", "system") and self.game_state:
+                            self.save_game()
+                            now = pygame.time.get_ticks()
+                            self._notifications.append(("GAME SAVED  [F5]", now + 3000, (80, 220, 120)))
+                    if event.key == pygame.K_F9:
+                        if self.state in ("galaxy", "system"):
+                            self._quickload()
                 self.game_clock.handle_event(event)   # speed badge click
 
             # Clock + simulation update
@@ -457,5 +568,9 @@ class App:
 
             # Tooltip — drawn last so it appears above everything
             self.tooltip.draw(self.screen)
+
+            # Victory overlay
+            if self._victory_state:
+                self._draw_victory_overlay(self.screen)
 
             pygame.display.flip()

@@ -113,6 +113,8 @@ class ShipOrder:
     target_body_id:   str | None  = None
     travel_speed:     float       = 0.25            # fraction of journey per in-game year
     progress:         float       = 0.0             # 0.0 → 1.0; 1.0 = arrived
+    waypoints: list = field(default_factory=list)  # system_id sequence for multi-hop travel
+    current_waypoint_idx: int = 0                  # which leg we're currently on
 
 
 class OrderQueue:
@@ -142,6 +144,43 @@ class OrderQueue:
 
     def get_all(self, location_id: str, ship_type: str) -> list[ShipOrder]:
         return list(self._orders.get(self._key(location_id, ship_type), []))
+
+    def to_dict(self) -> dict:
+        result = {}
+        for k, orders in self._orders.items():
+            result[k] = [
+                {
+                    "order_id":            o.order_id,
+                    "order_type":          o.order_type,
+                    "target_system_id":    o.target_system_id,
+                    "target_body_id":      o.target_body_id,
+                    "travel_speed":        o.travel_speed,
+                    "progress":            o.progress,
+                    "waypoints":           list(o.waypoints),
+                    "current_waypoint_idx": o.current_waypoint_idx,
+                }
+                for o in orders
+            ]
+        return result
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "OrderQueue":
+        oq = cls()
+        for k, orders in d.items():
+            loc, stype = k.rsplit(":", 1)
+            for od in orders:
+                order = ShipOrder(
+                    order_id=od.get("order_id", ""),
+                    order_type=od.get("order_type", "travel"),
+                    target_system_id=od.get("target_system_id"),
+                    target_body_id=od.get("target_body_id"),
+                    travel_speed=od.get("travel_speed", 0.25),
+                    progress=od.get("progress", 0.0),
+                    waypoints=od.get("waypoints", []),
+                    current_waypoint_idx=od.get("current_waypoint_idx", 0),
+                )
+                oq.enqueue(loc, stype, order)
+        return oq
 
     def all_keys(self) -> list[tuple[str, str]]:
         result = []
@@ -188,7 +227,7 @@ class SimulationEngine:
     def tick(self, dt_years: float) -> list:
         """Run one sim step. Returns event dicts for UI notification."""
         events: list = []
-        self._tick_bios(dt_years)
+        events.extend(self._tick_bios(dt_years))
         events.extend(self._tick_power_plants(dt_years))
         events.extend(self._tick_research(dt_years))
         events.extend(self._tick_ships(dt_years))
@@ -196,13 +235,82 @@ class SimulationEngine:
         self._tick_extractors(dt_years)
         events.extend(self._tick_factories(dt_years))
         events.extend(self._tick_shipyards(dt_years))
+
+        # Victory check
+        if not self.gs._victory_declared:
+            v = self.gs.check_victory()
+            if v:
+                self.gs._victory_declared = True
+                events.append({"type": "victory", "victory_type": v})
+
         return events
 
     # ------------------------------------------------------------------
 
-    def _tick_bios(self, dt_years: float) -> None:
+    def _tick_bios(self, dt_years: float) -> list:
+        """Bio population growth, spread, and extractor damage."""
+        events: list = []
+        galaxy = self.gs.galaxy
+        rng = random.Random()
+
+        # Build body-to-system map and system-body lists for spread
+        body_to_system: dict[str, str] = {}
+        system_bodies: dict[str, list] = {}
+        if galaxy:
+            for sys in galaxy.solar_systems:
+                bodies: list = []
+                for body in sys.orbital_bodies:
+                    bodies.append(body)
+                    body_to_system[body.id] = sys.id
+                    for moon in body.moons:
+                        bodies.append(moon)
+                        body_to_system[moon.id] = sys.id
+                system_bodies[sys.id] = bodies
+
         for pop in self.gs.bio_state.all():
             pop.tick(dt_years)
+
+            # Spread: when population > 70% capacity, small chance to seed nearby body
+            if pop.population > 0.7 * pop.capacity:
+                if rng.random() < 0.005 * dt_years:
+                    sys_id = body_to_system.get(pop.body_id)
+                    if sys_id and sys_id in system_bodies:
+                        candidates = [
+                            b for b in system_bodies[sys_id]
+                            if b.id != pop.body_id
+                            and not self.gs.bio_state.get(b.id)
+                            and getattr(getattr(b, "resources", None), "bios", 0) > 0
+                        ]
+                        if candidates:
+                            target = rng.choice(candidates)
+                            seed_pop = BioPopulation(
+                                body_id=target.id,
+                                system_id=sys_id,
+                                bio_type=pop.bio_type,
+                                population=max(1.0, pop.population * 0.02),
+                                aggression=pop.aggression,
+                                growth_rate=pop.growth_rate,
+                            )
+                            self.gs.bio_state.add(seed_pop)
+
+            # Extractor damage: uplifted bios with aggression > 0.5
+            if pop.bio_type == BioType.UPLIFTED and pop.aggression > 0.5:
+                damage_chance = pop.aggression * 0.08 * dt_years
+                if rng.random() < damage_chance:
+                    extractors = [
+                        i for i in self.gs.entity_roster.at(pop.body_id)
+                        if i.category == "structure" and i.type_value == "extractor"
+                        and i.count > 0
+                    ]
+                    if extractors:
+                        self.gs.entity_roster.remove("structure", "extractor", pop.body_id, 1)
+                        events.append({
+                            "type":      "bios_attack",
+                            "body_id":   pop.body_id,
+                            "system_id": body_to_system.get(pop.body_id, ""),
+                        })
+
+        return events
 
     def _tick_power_plants(self, dt_years: float) -> list:
         from .models.entity import POWER_PLANT_SPECS

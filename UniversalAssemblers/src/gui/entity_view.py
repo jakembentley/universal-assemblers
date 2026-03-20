@@ -628,11 +628,16 @@ class EntityView:
 
         from ..simulation import ShipOrder, SHIP_SPEEDS
         speed = SHIP_SPEEDS.get(self._type_value, 0.25)
+        # Compute BFS waypoints for multi-hop visual path
+        waypoints: list[str] = []
+        if loc and self._send_system_id and loc != self._send_system_id:
+            waypoints = gs.shortest_path(loc, self._send_system_id)
         order = ShipOrder(
             order_type="travel",
             target_system_id=self._send_system_id,
             target_body_id=target_body_id,
             travel_speed=speed,
+            waypoints=waypoints,
         )
         gs.order_queue.enqueue(loc, self._type_value, order)
         self._send_mode      = False

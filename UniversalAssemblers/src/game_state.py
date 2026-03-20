@@ -472,6 +472,8 @@ class GameState:
         self.shipyard_tasks: ShipyardTaskList = ShipyardTaskList()
         # body_env cache: body_id → {orbital_radius, subtype, star_luminosity}
         self.body_env: dict[str, dict] = {}
+        self._victory_declared: bool = False
+        self.in_game_years: float = 0.0
 
     # ------------------------------------------------------------------
     # Factory
@@ -582,6 +584,7 @@ class GameState:
 
     def tick(self, dt_years: float) -> None:
         """Advance the non-player simulation. Called every game frame when unpaused."""
+        self.in_game_years += dt_years
         self._sim_events = self.sim_engine.tick(dt_years)
 
     def pop_sim_events(self) -> list:
@@ -645,6 +648,58 @@ class GameState:
     def is_probed(self, system_id: str) -> bool:
         return system_id in self.probed_systems
 
+    def shortest_path(self, from_id: str, to_id: str) -> list[str]:
+        """BFS shortest path between two system IDs using adjacency graph.
+        Returns list of system IDs (inclusive of start and end)."""
+        if from_id == to_id:
+            return [from_id]
+        visited: set[str] = {from_id}
+        queue: list[list[str]] = [[from_id]]
+        while queue:
+            path = queue.pop(0)
+            for neighbor in self.adjacency.get(path[-1], []):
+                if neighbor == to_id:
+                    return path + [neighbor]
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(path + [neighbor])
+        return [from_id, to_id]  # Fallback: direct connection if not found
+
+    def check_victory(self) -> str | None:
+        """Check win conditions each tick. Returns victory type or None."""
+        from .models.tech import TECH_TREE
+        # Technology: all tech nodes researched
+        if len(self.tech.researched) >= len(TECH_TREE):
+            return "technology"
+        # Construction: doom_machine entity built
+        if self.entity_roster.total("structure", "doom_machine") > 0:
+            return "construction"
+        # Domination: player entities in ≥ 60% of discovered systems
+        if self.galaxy:
+            discovered = [
+                s for s in self.galaxy.solar_systems
+                if self._states.get(s.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED)
+            ]
+            if len(discovered) >= 3:
+                colonized_count = 0
+                for sys in discovered:
+                    has_entities = False
+                    all_bodies = list(sys.orbital_bodies)
+                    for body in sys.orbital_bodies:
+                        all_bodies.extend(body.moons)
+                    for b in all_bodies:
+                        if any(
+                            i.category in ("structure", "bot")
+                            for i in self.entity_roster.at(b.id)
+                        ):
+                            has_entities = True
+                            break
+                    if has_entities:
+                        colonized_count += 1
+                if colonized_count >= len(discovered) * 0.6:
+                    return "domination"
+        return None
+
     # ------------------------------------------------------------------
     # Serialisation
 
@@ -660,6 +715,7 @@ class GameState:
             "factory_tasks":        self.factory_tasks.to_dict(),
             "shipyard_tasks":       self.shipyard_tasks.to_dict(),
             "bot_tasks":            self.bot_tasks.to_dict(),
+            "order_queue":          self.order_queue.to_dict(),
         }
 
     @classmethod
@@ -679,6 +735,8 @@ class GameState:
         gs.factory_tasks  = FactoryTaskList.from_dict(d.get("factory_tasks", {}))
         gs.shipyard_tasks = ShipyardTaskList.from_dict(d.get("shipyard_tasks", {}))
         gs.bot_tasks      = BotTaskList.from_dict(d.get("bot_tasks", {}))
+        from .simulation import OrderQueue
+        gs.order_queue = OrderQueue.from_dict(d.get("order_queue", {}))
 
         gs._init_bio_state()
 

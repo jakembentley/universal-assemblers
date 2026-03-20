@@ -139,7 +139,7 @@ class EnergyView:
 
         from ..models.entity import (
             compute_energy_balance, POWER_PLANT_SPECS, StructureType,
-            compute_power_modifier,
+            compute_power_modifier, ENERGY_CONSUMPTION,
         )
 
         total_content_h = 0
@@ -245,6 +245,21 @@ class EnergyView:
                         pygame.draw.rect(surface, row_col, pygame.Rect(cx + 6, cy + 22, bar_w, 4))
 
                 cy += _BODY_ROW_H
+
+                # Bot consumption sub-row
+                bot_cons = sum(
+                    ENERGY_CONSUMPTION.get(i.type_value, 0.0) * i.count
+                    for i in gs.entity_roster.at(body.id)
+                    if i.category == "bot"
+                )
+                if bot_cons > 0:
+                    if cy >= content_y_start - _SUBROW_H and cy < content_rect.bottom:
+                        bot_s = font(10).render(
+                            f"  ↳ Bots: -{bot_cons:,.0f}/yr",
+                            True, (160, 200, 255),
+                        )
+                        surface.blit(bot_s, (cx + 16, cy + 2))
+                    cy += _SUBROW_H
 
                 # Offline plant sub-rows
                 for plant_tv in offline_plants:

@@ -262,6 +262,9 @@ class GalaxyView:
         # 4. System nodes + labels (above fog)
         self._draw_nodes(surface)
 
+        # 4.5 Ship travel arcs
+        self._draw_travel_arcs(surface)
+
         # 5. Selected highlight ring
         if self._selected_id:
             sp = self._screen_pos.get(self._selected_id)
@@ -313,6 +316,65 @@ class GalaxyView:
                 else:
                     # Dashed line for detected connections
                     self._draw_dashed_line(surface, color, sp_a, sp_b)
+
+    def _draw_travel_arcs(self, surface: pygame.Surface) -> None:
+        """Draw dotted travel lines for all ships currently in transit."""
+        gs = self.app.game_state
+        if not gs:
+            return
+        _TRAVEL_COLORS: dict[str, tuple] = {
+            "probe":         (0, 180, 220),
+            "drop_ship":     (220, 150, 40),
+            "mining_vessel": (180, 170, 60),
+            "transport":     (100, 180, 100),
+            "warship":       (220, 60,  60),
+        }
+        _DEFAULT_COLOR = (140, 140, 180)
+
+        for loc_id, ship_type in gs.order_queue.all_keys():
+            order = gs.order_queue.peek(loc_id, ship_type)
+            if not order or order.order_type != "travel":
+                continue
+            waypoints = order.waypoints
+            if len(waypoints) < 2:
+                # Simple direct travel: draw line from source to destination
+                sp_a = self._screen_pos.get(loc_id)
+                sp_b = self._screen_pos.get(order.target_system_id or "")
+                if sp_a and sp_b and sp_a != sp_b:
+                    col = _TRAVEL_COLORS.get(ship_type, _DEFAULT_COLOR)
+                    # Interpolate current position along the line
+                    px = int(sp_a[0] + (sp_b[0] - sp_a[0]) * order.progress)
+                    py = int(sp_a[1] + (sp_b[1] - sp_a[1]) * order.progress)
+                    # Draw dotted line from current position to destination
+                    self._draw_dashed_line(surface, (*col, 140), (px, py), sp_b, dash=5, gap=4)
+                    # Small filled circle at current position
+                    pos_surf = pygame.Surface((8, 8), pygame.SRCALPHA)
+                    pygame.draw.circle(pos_surf, (*col, 200), (4, 4), 3)
+                    surface.blit(pos_surf, (px - 4, py - 4))
+            else:
+                # Multi-hop: draw lines through all remaining waypoints
+                col = _TRAVEL_COLORS.get(ship_type, _DEFAULT_COLOR)
+                cwi = order.current_waypoint_idx
+                pts: list[tuple[int, int]] = []
+                # Current position (interpolated on current leg)
+                if cwi < len(waypoints) - 1:
+                    sp_a = self._screen_pos.get(waypoints[cwi])
+                    sp_b = self._screen_pos.get(waypoints[cwi + 1])
+                    if sp_a and sp_b:
+                        px = int(sp_a[0] + (sp_b[0] - sp_a[0]) * order.progress)
+                        py = int(sp_a[1] + (sp_b[1] - sp_a[1]) * order.progress)
+                        pts.append((px, py))
+                # Remaining waypoint screen positions
+                for wid in waypoints[cwi + 1:]:
+                    sp = self._screen_pos.get(wid)
+                    if sp:
+                        pts.append(sp)
+                for i in range(len(pts) - 1):
+                    self._draw_dashed_line(surface, (*col, 140), pts[i], pts[i + 1], dash=5, gap=4)
+                if pts:
+                    pos_surf = pygame.Surface((8, 8), pygame.SRCALPHA)
+                    pygame.draw.circle(pos_surf, (*col, 200), (4, 4), 3)
+                    surface.blit(pos_surf, (pts[0][0] - 4, pts[0][1] - 4))
 
     @staticmethod
     def _draw_dashed_line(
