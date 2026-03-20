@@ -21,6 +21,7 @@ from .entity_view import EntityView
 from .tech_view import TechView
 from .energy_view import EnergyView
 from .queue_view import QueueView
+from .ledger_view import LedgerView
 from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
@@ -53,6 +54,7 @@ class App:
         self.tech_view      = TechView(self)
         self.energy_view    = EnergyView(self)
         self.queue_view     = QueueView(self)
+        self.ledger_view    = LedgerView(self)
         self.tooltip        = Tooltip()
         self.new_game_panel = NewGamePanel(self)
 
@@ -103,6 +105,7 @@ class App:
 
     def back_to_galaxy(self) -> None:
         self.entity_view.deactivate()
+        self.ledger_view.deactivate()
         self.state = "galaxy"
 
     # ------------------------------------------------------------------
@@ -153,6 +156,16 @@ class App:
 
     def close_queue_view(self) -> None:
         self.queue_view.deactivate()
+
+    def open_ledger_view(self) -> None:
+        self.entity_view.deactivate()
+        self.tech_view.deactivate()
+        self.energy_view.deactivate()
+        self.queue_view.deactivate()
+        self.ledger_view.activate()
+
+    def close_ledger_view(self) -> None:
+        self.ledger_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -305,6 +318,7 @@ class App:
         self.tech_view   = TechView(self)
         self.energy_view = EnergyView(self)
         self.queue_view  = QueueView(self)
+        self.ledger_view = LedgerView(self)
         if self.galaxy_view:
             self.galaxy_view = GalaxyView(self)
         if self.game_view:
@@ -554,7 +568,9 @@ class App:
                     self.quit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.queue_view.is_active:
+                        if self.ledger_view.is_active:
+                            self.close_ledger_view()
+                        elif self.queue_view.is_active:
                             self.close_queue_view()
                         elif self.energy_view.is_active:
                             self.close_energy_view()
@@ -601,13 +617,15 @@ class App:
                 self.new_game_panel.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
                 overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
-                                   or self.energy_view.is_active or self.queue_view.is_active)
+                                   or self.energy_view.is_active or self.queue_view.is_active
+                                   or self.ledger_view.is_active)
                 if not overlays_active:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
                 overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
-                                   or self.energy_view.is_active or self.queue_view.is_active)
+                                   or self.energy_view.is_active or self.queue_view.is_active
+                                   or self.ledger_view.is_active)
                 if not overlays_active:
                     self.game_view.handle_events(events)
                 self.game_view.draw(self.screen)
@@ -634,6 +652,11 @@ class App:
             if self.queue_view.is_active:
                 self.queue_view.handle_events(events)
                 self.queue_view.draw(self.screen)
+
+            # Ledger overlay
+            if self.ledger_view.is_active:
+                self.ledger_view.handle_events(events)
+                self.ledger_view.draw(self.screen)
 
             # Tooltip — drawn last so it appears above everything
             self.tooltip.draw(self.screen)

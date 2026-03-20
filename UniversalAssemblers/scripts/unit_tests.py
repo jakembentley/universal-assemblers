@@ -1656,6 +1656,197 @@ except Exception as e:
     fail("can_enter dynamic probed_systems (exception)", str(e))
 
 
+# ─── Ledger: format_ledger_event ─────────────────────────────────────────────
+section("Ledger: format_ledger_event")
+
+from src.models.ledger import format_ledger_event, CATEGORY_ENTITY, CATEGORY_RANDOM
+
+# victory event → returns None
+try:
+    result_victory = format_ledger_event({"type": "victory"}, {}, None)
+    assert result_victory is None, \
+        f"format_ledger_event should return None for 'victory' event, got {result_victory!r}"
+    ok("format_ledger_event returns None for 'victory' event")
+except AssertionError as e:
+    fail("format_ledger_event victory returns None", str(e))
+except Exception as e:
+    fail("format_ledger_event victory returns None (exception)", f"unexpected exception: {e}")
+
+# tech_complete → CATEGORY_ENTITY, system_id=None
+try:
+    result_tech = format_ledger_event({"type": "tech_complete", "tech_id": "structure_modules"}, {}, None)
+    assert result_tech is not None, "tech_complete should produce a result"
+    msg_t, color_t, cat_t, sid_t = result_tech
+    assert cat_t == CATEGORY_ENTITY, f"tech_complete should be CATEGORY_ENTITY, got {cat_t!r}"
+    assert sid_t is None, f"tech_complete system_id should be None, got {sid_t!r}"
+    ok("format_ledger_event tech_complete -> CATEGORY_ENTITY, system_id=None")
+except AssertionError as e:
+    fail("format_ledger_event tech_complete category", str(e))
+except Exception as e:
+    fail("format_ledger_event tech_complete category (exception)", f"unexpected exception: {e}")
+
+# bios_entity_damaged → CATEGORY_RANDOM
+try:
+    result_bio = format_ledger_event(
+        {"type": "bios_entity_damaged", "entity_type": "factory", "system_id": "sys_x"},
+        {}, None,
+    )
+    assert result_bio is not None, "bios_entity_damaged should produce a result"
+    _msg_b, _color_b, cat_b, _sid_b = result_bio
+    assert cat_b == CATEGORY_RANDOM, f"bios_entity_damaged should be CATEGORY_RANDOM, got {cat_b!r}"
+    ok("format_ledger_event bios_entity_damaged -> CATEGORY_RANDOM")
+except AssertionError as e:
+    fail("format_ledger_event bios_entity_damaged category", str(e))
+except Exception as e:
+    fail("format_ledger_event bios_entity_damaged category (exception)", f"unexpected exception: {e}")
+
+# unknown event type → returns None
+try:
+    result_unk = format_ledger_event({"type": "totally_unknown_event_xyz"}, {}, None)
+    assert result_unk is None, \
+        f"format_ledger_event should return None for unknown event type, got {result_unk!r}"
+    ok("format_ledger_event returns None for unknown event type")
+except AssertionError as e:
+    fail("format_ledger_event unknown event type returns None", str(e))
+except Exception as e:
+    fail("format_ledger_event unknown event type returns None (exception)", f"unexpected exception: {e}")
+
+
+# ─── Ledger: GameState._ledger and get_ledger ─────────────────────────────────
+section("Ledger: GameState._ledger and get_ledger")
+
+# get_ledger returns empty list on fresh game (no ticks)
+try:
+    gs_led = _fresh_gs()
+    ledger = gs_led.get_ledger()
+    assert isinstance(ledger, list), \
+        f"get_ledger should return a list, got {type(ledger).__name__}"
+    assert len(ledger) == 0, \
+        f"get_ledger should return [] on fresh game with no ticks, got {len(ledger)} entries"
+    ok("get_ledger returns [] on fresh game (no ticks)")
+except AssertionError as e:
+    fail("get_ledger empty on fresh game", str(e))
+except Exception as e:
+    fail("get_ledger empty on fresh game (exception)", f"unexpected exception: {e}")
+
+# get_ledger returns entries after tick that emits global events (system_id=None)
+# tech_complete events have system_id=None → always visible regardless of probed_systems
+try:
+    gs_led2 = _fresh_gs()
+    # Inject a tech_complete event directly through _ingest_events_to_ledger
+    gs_led2._ingest_events_to_ledger([{"type": "tech_complete", "tech_id": "structure_modules"}])
+    ledger2 = gs_led2.get_ledger()
+    assert len(ledger2) >= 1, \
+        f"get_ledger should return >= 1 entry after tech_complete event, got {len(ledger2)}"
+    ok("get_ledger returns entries after global event ingested (system_id=None)")
+except AssertionError as e:
+    fail("get_ledger returns entries after global event", str(e))
+except Exception as e:
+    fail("get_ledger returns entries after global event (exception)", f"unexpected exception: {e}")
+
+# Events in unprobed systems are NOT returned by get_ledger
+try:
+    gs_led3 = _fresh_gs()
+    # Pick a system that is NOT in probed_systems
+    all_ids_led3 = [s.id for s in gs_led3.galaxy.solar_systems]
+    home_led3 = gs_led3.galaxy.solar_systems[0].id
+    non_home_led3 = [sid for sid in all_ids_led3 if sid != home_led3]
+    if non_home_led3:
+        unprobed = non_home_led3[0]
+        assert unprobed not in gs_led3.probed_systems, \
+            "test requires the system to be unprobed"
+        # Inject an event in the unprobed system
+        gs_led3._ingest_events_to_ledger([
+            {"type": "resource_depleted", "resource": "gas", "system_id": unprobed}
+        ])
+        ledger3 = gs_led3.get_ledger()
+        assert len(ledger3) == 0, \
+            f"events in unprobed systems should not appear in ledger, got {len(ledger3)} entries"
+        ok("events in unprobed system are filtered out of get_ledger()")
+    else:
+        ok("unprobed system visibility skipped (single-system galaxy)")
+except AssertionError as e:
+    fail("get_ledger filters unprobed system events", str(e))
+except Exception as e:
+    fail("get_ledger filters unprobed system events (exception)", f"unexpected exception: {e}")
+
+# Events in probed systems ARE returned by get_ledger
+try:
+    gs_led4 = _fresh_gs()
+    all_ids_led4 = [s.id for s in gs_led4.galaxy.solar_systems]
+    home_led4 = gs_led4.galaxy.solar_systems[0].id
+    non_home_led4 = [sid for sid in all_ids_led4 if sid != home_led4]
+    if non_home_led4:
+        probed_target = non_home_led4[0]
+        gs_led4.probed_systems.add(probed_target)
+        gs_led4._ingest_events_to_ledger([
+            {"type": "resource_depleted", "resource": "gas", "system_id": probed_target}
+        ])
+        ledger4 = gs_led4.get_ledger()
+        assert len(ledger4) >= 1, \
+            f"events in probed systems should appear in ledger, got {len(ledger4)} entries"
+        ok("events in probed system appear in get_ledger()")
+    else:
+        ok("probed system event visibility skipped (single-system galaxy)")
+except AssertionError as e:
+    fail("get_ledger shows probed system events", str(e))
+except Exception as e:
+    fail("get_ledger shows probed system events (exception)", f"unexpected exception: {e}")
+
+# get_ledger(filter_category="entity") returns only entity-category entries
+try:
+    gs_led5 = _fresh_gs()
+    # Inject one entity event (tech_complete → CATEGORY_ENTITY, system_id=None)
+    # and one random event (vein_discovery → CATEGORY_RANDOM, system_id=None)
+    gs_led5._ingest_events_to_ledger([
+        {"type": "tech_complete", "tech_id": "structure_modules"},
+        {"type": "research_breakthrough", "tech_id": "structure_modules", "tech_completed": False},
+    ])
+    entity_entries = gs_led5.get_ledger(filter_category="entity")
+    assert len(entity_entries) >= 1, \
+        f"get_ledger(filter_category='entity') should return >= 1 entry, got {len(entity_entries)}"
+    assert all(e.category == CATEGORY_ENTITY for e in entity_entries), \
+        "all entries from filter_category='entity' must have CATEGORY_ENTITY"
+    ok("get_ledger(filter_category='entity') returns only entity entries")
+except AssertionError as e:
+    fail("get_ledger filter_category entity", str(e))
+except Exception as e:
+    fail("get_ledger filter_category entity (exception)", f"unexpected exception: {e}")
+
+# get_ledger(filter_category="random") returns only random-category entries
+try:
+    gs_led6 = _fresh_gs()
+    # research_breakthrough → CATEGORY_RANDOM when tech not completed
+    gs_led6._ingest_events_to_ledger([
+        {"type": "tech_complete", "tech_id": "structure_modules"},
+        {"type": "research_breakthrough", "tech_id": "structure_modules", "tech_completed": False},
+    ])
+    random_entries = gs_led6.get_ledger(filter_category="random")
+    assert len(random_entries) >= 1, \
+        f"get_ledger(filter_category='random') should return >= 1 entry, got {len(random_entries)}"
+    assert all(e.category == CATEGORY_RANDOM for e in random_entries), \
+        "all entries from filter_category='random' must have CATEGORY_RANDOM"
+    ok("get_ledger(filter_category='random') returns only random entries")
+except AssertionError as e:
+    fail("get_ledger filter_category random", str(e))
+except Exception as e:
+    fail("get_ledger filter_category random (exception)", f"unexpected exception: {e}")
+
+# _ledger is capped at _LEDGER_MAX (500 entries)
+try:
+    gs_led7 = _fresh_gs()
+    # Flood the ledger with 600 global events; each tech_complete has system_id=None so all pass filter
+    batch = [{"type": "tech_complete", "tech_id": "structure_modules"}] * 600
+    gs_led7._ingest_events_to_ledger(batch)
+    assert len(gs_led7._ledger) == gs_led7._LEDGER_MAX, \
+        f"_ledger should be capped at {gs_led7._LEDGER_MAX}, got {len(gs_led7._ledger)}"
+    ok(f"_ledger is capped at _LEDGER_MAX={gs_led7._LEDGER_MAX} entries")
+except AssertionError as e:
+    fail("_ledger capped at _LEDGER_MAX", str(e))
+except Exception as e:
+    fail("_ledger capped at _LEDGER_MAX (exception)", f"unexpected exception: {e}")
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")
