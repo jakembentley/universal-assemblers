@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/write_smoke_tests.sh",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/write_smoke_tests.sh",
             "timeout": 15000
           }
         ]
@@ -18,12 +18,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/run_smoke_tests.sh",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/run_smoke_tests.sh",
             "timeout": 30000
           },
           {
             "type": "command",
-            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/run_lint.sh",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/run_lint.sh",
             "timeout": 30000
           }
         ]
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/test_and_push.sh",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/test_and_push.sh",
             "timeout": 60000
           }
         ]

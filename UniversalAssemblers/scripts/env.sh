@@ -62,3 +62,10 @@ _UA_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$_UA_SCRIPTS_DIR/.." && pwd)"
 PROJECT="$(basename "$PROJECT_DIR")"
 REPO="$(cd "$PROJECT_DIR/.." && pwd)"
+
+# ── Local machine overrides (from scripts/local.env.sh if present) ──────────
+_UA_LOCAL="$_UA_SCRIPTS_DIR/local.env.sh"
+if [ -f "$_UA_LOCAL" ]; then
+    source "$_UA_LOCAL"
+    [ -n "$UA_PYTHON" ] && PYTHON="$UA_PYTHON"
+fi

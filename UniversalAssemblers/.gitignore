@@ -25,3 +25,6 @@ Thumbs.db
 
 # Generated map files (exclude from version control by default)
 maps/*.json
+
+# Machine-local config (paths differ per machine — see CLAUDE.md)
+scripts/local.env.sh
