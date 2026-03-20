@@ -29,25 +29,35 @@ if TYPE_CHECKING:
 
 @dataclass
 class BioPopulation:
-    body_id:     str
-    system_id:   str
-    bio_type:    BioType
-    population:  float          # headcount; fractional for simulation precision
-    aggression:  float          # 0.0–1.0 threat level
-    growth_rate: float          # annual fractional growth (e.g. 0.03 = 3 %/yr)
-    capacity:    float = 0.0    # logistic carrying capacity; set by __post_init__
+    body_id:      str
+    system_id:    str
+    bio_type:     BioType
+    population:   float          # headcount; fractional for simulation precision
+    aggression:   float          # 0.0–1.0 threat level
+    growth_rate:  float          # annual fractional growth (e.g. 0.03 = 3 %/yr)
+    capacity:     float = 0.0    # base logistic carrying capacity; set by __post_init__
+    initial_bios: float = 0.0    # bios resource on this body at seeding time
 
     def __post_init__(self) -> None:
         if self.capacity <= 0:
             self.capacity = self.population * 20.0
 
-    def tick(self, dt_years: float) -> None:
-        """Logistic growth: dN/dt = r·N·(1 - N/K)."""
+    def tick(self, dt_years: float, effective_capacity: float | None = None) -> None:
+        """Logistic growth: dN/dt = r·N·(1 - N/K).
+
+        effective_capacity overrides self.capacity when bios availability has
+        reduced the carrying capacity below its base value.
+        """
         r = self.growth_rate
-        K = self.capacity
+        K = max(1.0, effective_capacity if effective_capacity is not None else self.capacity)
         N = self.population
         dN = r * N * (1 - N / K) * dt_years
         self.population = max(1.0, N + dN)
+
+
+# How many bios resource units a population regenerates per individual per year.
+# Primitive populations produce biological material; uplifted ones consume/destroy it.
+_BIOS_REGEN_PER_POP: float = 0.001
 
 
 class BioState:
@@ -61,6 +71,9 @@ class BioState:
 
     def get(self, body_id: str) -> BioPopulation | None:
         return self._pops.get(body_id)
+
+    def remove(self, body_id: str) -> None:
+        self._pops.pop(body_id, None)
 
     def all(self) -> list[BioPopulation]:
         return list(self._pops.values())
@@ -86,6 +99,7 @@ def make_bio_population(
         population=population,
         aggression=aggression,
         growth_rate=growth_rate,
+        initial_bios=bios_resource,
     )
 
 
@@ -251,13 +265,14 @@ class SimulationEngine:
     # ------------------------------------------------------------------
 
     def _tick_bios(self, dt_years: float) -> list:
-        """Bio population growth, spread, mutation, and general entity attacks."""
+        """Bio population growth, spread, mutation, attacks, and bios resource feedback."""
         events: list = []
         galaxy = self.gs.galaxy
         rng = self.rng
 
-        # Build body-to-system map and system-body lists for spread
+        # Build body-to-system map, system-body lists, and body object map
         body_to_system: dict[str, str] = {}
+        body_map: dict[str, object] = {}
         system_bodies: dict[str, list] = {}
         if galaxy:
             for sys in galaxy.solar_systems:
@@ -265,15 +280,51 @@ class SimulationEngine:
                 for body in sys.orbital_bodies:
                     bodies.append(body)
                     body_to_system[body.id] = sys.id
+                    body_map[body.id] = body
                     for moon in body.moons:
                         bodies.append(moon)
                         body_to_system[moon.id] = sys.id
+                        body_map[moon.id] = moon
                 system_bodies[sys.id] = bodies
 
-        for pop in self.gs.bio_state.all():
-            pop.tick(dt_years)
+        extinct_ids: list[str] = []
 
-            # Spread: when population > 70% capacity, small chance to seed nearby body
+        for pop in self.gs.bio_state.all():
+            body = body_map.get(pop.body_id)
+            current_bios = getattr(getattr(body, "resources", None), "bios", 0.0) if body else 0.0
+
+            # --- Capacity scaling based on available bios resource ---
+            # When bios has been depleted below its seeded level the ecosystem
+            # supports fewer individuals; carrying capacity shrinks proportionally.
+            if pop.initial_bios > 0:
+                bios_fraction = min(1.0, current_bios / pop.initial_bios)
+                effective_capacity = max(1.0, pop.capacity * bios_fraction)
+            else:
+                effective_capacity = pop.capacity
+
+            pop.tick(dt_years, effective_capacity)
+
+            # --- Primitive populations regenerate bios resource ---
+            # Primitive populations maintain the biological substrate; uplifted
+            # populations consume/degrade the environment (no regen).
+            if pop.bio_type == BioType.PRIMITIVE and body is not None:
+                regen = pop.population * _BIOS_REGEN_PER_POP * dt_years
+                bios_cap = (pop.initial_bios * 2.0) if pop.initial_bios > 0 else 500.0
+                res = body.resources  # type: ignore[attr-defined]
+                res.bios = min(bios_cap, res.bios + regen)
+
+            # --- Extinction: bios depleted and population critically low ---
+            if current_bios <= 0 and pop.population <= 2.0 and pop.initial_bios > 0:
+                extinct_ids.append(pop.body_id)
+                events.append({
+                    "type":      "bios_extinction",
+                    "body_id":   pop.body_id,
+                    "system_id": body_to_system.get(pop.body_id, ""),
+                    "bio_type":  pop.bio_type.value,
+                })
+                continue
+
+            # --- Spread: when population > 70% capacity, small chance to seed nearby body ---
             if pop.population > 0.7 * pop.capacity:
                 if rng.random() < 0.005 * dt_years:
                     sys_id = body_to_system.get(pop.body_id)
@@ -286,6 +337,9 @@ class SimulationEngine:
                         ]
                         if candidates:
                             target = rng.choice(candidates)
+                            seed_bios = getattr(
+                                getattr(target, "resources", None), "bios", 0.0
+                            )
                             seed_pop = BioPopulation(
                                 body_id=target.id,
                                 system_id=sys_id,
@@ -293,10 +347,11 @@ class SimulationEngine:
                                 population=max(1.0, pop.population * 0.02),
                                 aggression=pop.aggression,
                                 growth_rate=pop.growth_rate,
+                                initial_bios=seed_bios,
                             )
                             self.gs.bio_state.add(seed_pop)
 
-            # Mutation: primitive bios near heavy player construction can become uplifted
+            # --- Mutation: primitive bios near heavy player construction can become uplifted ---
             if pop.bio_type == BioType.PRIMITIVE:
                 structure_count = sum(
                     i.count for i in self.gs.entity_roster.at(pop.body_id)
@@ -313,7 +368,7 @@ class SimulationEngine:
                             "system_id": body_to_system.get(pop.body_id, ""),
                         })
 
-            # Attacks: uplifted bios with aggression > 0.5 can damage any entity type
+            # --- Attacks: uplifted bios with aggression > 0.5 can damage any entity type ---
             if pop.bio_type == BioType.UPLIFTED and pop.aggression > 0.5:
                 damage_chance = pop.aggression * 0.08 * dt_years
                 if rng.random() < damage_chance:
@@ -334,6 +389,9 @@ class SimulationEngine:
                             "entity_type": target.type_value,
                             "damage":      dmg,
                         })
+
+        for body_id in extinct_ids:
+            self.gs.bio_state.remove(body_id)
 
         return events
 
@@ -560,7 +618,7 @@ class SimulationEngine:
                     body_map[moon.id] = moon
 
         for struct_type, spec in POWER_PLANT_SPECS.items():
-            if spec.renewable or not spec.input_resource:
+            if not spec.input_resource:          # solar, wind, dark_matter: no fuel consumed
                 continue
             for inst in roster.by_category("structure"):
                 if inst.type_value != struct_type.value:
@@ -578,18 +636,19 @@ class SimulationEngine:
                 new_val = max(0.0, current - consumed)
                 setattr(res, spec.input_resource, new_val)
                 if current > 0 and new_val == 0.0:
-                    # Auto-deactivate the plant
-                    self.gs.power_plant_active[flag_key] = False
                     events.append({
                         "type": "resource_depleted",
                         "resource": spec.input_resource,
                         "location_id": inst.location_id,
                     })
-                    events.append({
-                        "type": "resource_depleted_plant",
-                        "location_id": inst.location_id,
-                        "plant_type": struct_type.value,
-                    })
+                    if not spec.renewable:
+                        # Non-renewable: auto-deactivate; renewable (bio) throttles via modifier
+                        self.gs.power_plant_active[flag_key] = False
+                        events.append({
+                            "type": "resource_depleted_plant",
+                            "location_id": inst.location_id,
+                            "plant_type": struct_type.value,
+                        })
         return events
 
     def _tick_research(self, dt_years: float) -> list:
@@ -639,7 +698,7 @@ class SimulationEngine:
         return events
 
     def _tick_ships(self, dt_years: float) -> list:
-        """Advance ship travel; convert Drop Ships on arrival; probe systems."""
+        """Advance ship travel hop-by-hop; convert Drop Ships on arrival; probe systems."""
         events: list = []
         oq     = self.gs.order_queue
         roster = self.gs.entity_roster
@@ -652,7 +711,20 @@ class SimulationEngine:
             if order.progress < 1.0:
                 continue
 
-            # Arrived
+            # Current leg complete — check if more waypoint hops remain
+            waypoints = order.waypoints
+            if waypoints and order.current_waypoint_idx + 1 < len(waypoints) - 1:
+                next_idx    = order.current_waypoint_idx + 1
+                next_sys_id = waypoints[next_idx]
+                roster.remove("ship", ship_type, loc_id, 1)
+                roster.add("ship", ship_type, next_sys_id, 1)
+                oq.dequeue(loc_id, ship_type)
+                order.progress             = 0.0
+                order.current_waypoint_idx = next_idx
+                oq.enqueue(next_sys_id, ship_type, order)
+                continue
+
+            # Final leg complete — arrived at destination
             oq.dequeue(loc_id, ship_type)
 
             if ship_type == "drop_ship":
@@ -660,7 +732,7 @@ class SimulationEngine:
                 dest = order.target_body_id or order.target_system_id or loc_id
                 roster.add("bot", "constructor", dest, 1)
                 roster.add("bot", "miner", dest, 1)
-                # Discover & probe the destination system
+                # Discover and probe the destination system
                 if order.target_system_id:
                     self.gs.discover_system(order.target_system_id)
                     self.gs.probed_systems.add(order.target_system_id)
@@ -695,7 +767,6 @@ class SimulationEngine:
                 roster.add("ship", ship_type, dest, 1)
                 if order.target_system_id:
                     self.gs.discover_system(order.target_system_id)
-                    self.gs.probed_systems.add(order.target_system_id)
                 events.append({
                     "type": "ship_arrived",
                     "ship_type": ship_type,

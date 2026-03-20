@@ -665,9 +665,7 @@ class GameState:
         return self._states.get(system_id, DiscoveryState.UNKNOWN)
 
     def can_enter(self, system_id: str) -> bool:
-        return self._states.get(system_id, DiscoveryState.UNKNOWN) in (
-            DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED
-        )
+        return system_id in self.probed_systems
 
     def discover_system(self, system_id: str) -> None:
         current = self._states.get(system_id, DiscoveryState.UNKNOWN)
@@ -746,6 +744,7 @@ class GameState:
         from .simulation import BioPopulation as _BP  # noqa: F401
         return {
             "version": 2,
+            "in_game_years":        self.in_game_years,
             "discovery_states":     {k: v.value for k, v in self._states.items()},
             "probed_systems":       list(self.probed_systems),
             "entity_roster":        self.entity_roster.to_dict(),
@@ -759,13 +758,14 @@ class GameState:
             "order_queue":          self.order_queue.to_dict(),
             "bio_state": [
                 {
-                    "body_id":     p.body_id,
-                    "system_id":   p.system_id,
-                    "bio_type":    p.bio_type.value,
-                    "population":  p.population,
-                    "aggression":  p.aggression,
-                    "growth_rate": p.growth_rate,
-                    "capacity":    p.capacity,
+                    "body_id":      p.body_id,
+                    "system_id":    p.system_id,
+                    "bio_type":     p.bio_type.value,
+                    "population":   p.population,
+                    "aggression":   p.aggression,
+                    "growth_rate":  p.growth_rate,
+                    "capacity":     p.capacity,
+                    "initial_bios": p.initial_bios,
                 }
                 for p in self.bio_state.all()
             ],
@@ -780,6 +780,7 @@ class GameState:
         for sys_id, state_val in d.get("discovery_states", {}).items():
             gs._states[sys_id] = DiscoveryState(state_val)
 
+        gs.in_game_years         = float(d.get("in_game_years", 0.0))
         gs.probed_systems        = set(d.get("probed_systems", []))
         gs.entity_roster         = EntityRoster.from_dict(d.get("entity_roster", {}))
         gs.tech                  = TechState.from_dict(d.get("tech", {}))
@@ -806,6 +807,7 @@ class GameState:
                     aggression=pd["aggression"],
                     growth_rate=pd["growth_rate"],
                     capacity=pd.get("capacity", 0.0),
+                    initial_bios=pd.get("initial_bios", 0.0),
                 )
                 gs.bio_state.add(pop)
         else:

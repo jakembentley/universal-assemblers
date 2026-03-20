@@ -398,6 +398,11 @@ class App:
                 loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
                 msg = f"BIOS MUTATED to Uplifted at {loc}"
                 col = (255, 120, 40)
+            elif etype == "bios_extinction":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                btype = (ev.get("bio_type") or "bio").title()
+                msg = f"BIOS EXTINCT: {btype} population lost at {loc}"
+                col = (180, 80, 200)
             elif etype in ("solar_flare_damaged", "solar_flare_destroyed"):
                 loc = self._location_name(None, ev.get("system_id"))
                 ent = (ev.get("entity_type") or "ship").replace("_", " ").title()

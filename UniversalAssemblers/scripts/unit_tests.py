@@ -422,8 +422,8 @@ gs_dom = GameState.new_game(_gen_dom.generate())
 
 try:
     # Discover all systems so discovered_count >= 3
-    for sys in gs_dom.galaxy.solar_systems:
-        gs_dom._states[sys.id] = DiscoveryState.DISCOVERED
+    for sol in gs_dom.galaxy.solar_systems:
+        gs_dom._states[sol.id] = DiscoveryState.DISCOVERED
     # Mark home as COLONIZED so it counts too
     home_dom = gs_dom.galaxy.solar_systems[0].id
     gs_dom._states[home_dom] = DiscoveryState.COLONIZED
@@ -436,11 +436,11 @@ try:
 
     # Place structures on bodies in enough systems to exceed 60% threshold
     placed = 0
-    for sys in discovered_systems:
+    for sol in discovered_systems:
         if placed >= needed:
             break
-        if sys.orbital_bodies:
-            body = sys.orbital_bodies[0]
+        if sol.orbital_bodies:
+            body = sol.orbital_bodies[0]
             gs_dom.entity_roster.add("structure", "factory", body.id, 1)
             placed += 1
 
@@ -739,6 +739,636 @@ except AssertionError as e:
     fail("bio_state round-trip", str(e))
 except Exception as e:
     fail("bio_state round-trip (exception)", str(e))
+
+
+# ─── EntityRoster + TechState + in_game_years save/load round-trip ───────────
+section("EntityRoster / TechState / in_game_years save/load round-trip")
+
+# entity_roster: multiple stacks at different locations survive round-trip
+try:
+    gs_er = _fresh_gs()
+    gs_er.entity_roster.add("structure", "factory", "body_a", 3)
+    gs_er.entity_roster.add("bot", "miner", "body_a", 2)
+    gs_er.entity_roster.add("ship", "probe", "sys_x", 1)
+
+    d_er = gs_er.to_dict()
+    gs_er2 = GameState.from_dict(d_er, gs_er.galaxy)
+
+    assert gs_er2.entity_roster.total("structure", "factory") >= 3, \
+        "factory count should survive round-trip"
+    at_a = {(i.category, i.type_value, i.count) for i in gs_er2.entity_roster.at("body_a")}
+    assert ("structure", "factory", 3) in at_a, "factory stack at body_a should survive"
+    assert ("bot", "miner", 2) in at_a, "miner stack at body_a should survive"
+    probe_at_sys = gs_er2.entity_roster.at("sys_x")
+    assert any(i.type_value == "probe" and i.count == 1 for i in probe_at_sys), \
+        "probe at sys_x should survive round-trip"
+    ok("entity_roster (multi-stack, multi-location) survives save/load round-trip")
+except AssertionError as e:
+    fail("entity_roster round-trip", str(e))
+except Exception as e:
+    fail("entity_roster round-trip (exception)", str(e))
+
+# tech state: researched set and in-progress research survive round-trip
+try:
+    gs_tech = _fresh_gs()
+    # Complete structure_modules (no prereqs), partially research energy_efficiency (also no prereqs)
+    cost_sm = TECH_TREE["structure_modules"].research_cost
+    gs_tech.tech.start_research("structure_modules")
+    gs_tech.tech.add_progress("structure_modules", cost_sm)  # fully complete
+    gs_tech.tech.start_research("energy_efficiency")
+    gs_tech.tech.add_progress("energy_efficiency", 5.0)       # partial progress
+
+    d_tech = gs_tech.to_dict()
+    gs_tech2 = GameState.from_dict(d_tech, gs_tech.galaxy)
+
+    assert "structure_modules" in gs_tech2.tech.researched, \
+        "completed tech should be in researched set after round-trip"
+    assert "energy_efficiency" not in gs_tech2.tech.researched, \
+        "partial tech should not be in researched set"
+    frac = gs_tech2.tech.progress_fraction("energy_efficiency")
+    assert frac > 0.0, f"in-progress tech fraction should be > 0, got {frac}"
+    ok("TechState (researched + in-progress) survives save/load round-trip")
+except AssertionError as e:
+    fail("TechState round-trip", str(e))
+except Exception as e:
+    fail("TechState round-trip (exception)", str(e))
+
+# in_game_years persists across save/load
+try:
+    gs_yr = _fresh_gs()
+    gs_yr.in_game_years = 42.5
+    d_yr = gs_yr.to_dict()
+    gs_yr2 = GameState.from_dict(d_yr, gs_yr.galaxy)
+    assert abs(gs_yr2.in_game_years - 42.5) < 0.001, \
+        f"in_game_years should be 42.5, got {gs_yr2.in_game_years}"
+    ok("in_game_years survives save/load round-trip")
+except AssertionError as e:
+    fail("in_game_years round-trip", str(e))
+except Exception as e:
+    fail("in_game_years round-trip (exception)", str(e))
+
+
+# ─── _tick_ships multi-hop waypoint travel ────────────────────────────────────
+section("_tick_ships multi-hop waypoint travel")
+
+from src.simulation import SimulationEngine
+
+# Helper: build a minimal GameState with no galaxy but with order_queue + entity_roster
+def _gs_for_ships():
+    """Minimal GameState-like object good enough for _tick_ships."""
+    gs = _fresh_gs()
+    return gs
+
+# Test 1: drop ship with 3-waypoint path [A, B, C], first leg completes → moves to B, not converted
+try:
+    gs_mh1 = _gs_for_ships()
+    sys_a = "sys_A"
+    sys_b = "sys_B"
+    sys_c = "sys_C"
+    # Place a drop ship at sys_A
+    gs_mh1.entity_roster.add("ship", "drop_ship", sys_a, 1)
+    order_mh1 = ShipOrder(
+        order_type="travel",
+        target_system_id=sys_c,
+        target_body_id=None,
+        travel_speed=1.0,   # speed=1.0 means one full tick (dt=1.0) completes one leg
+        progress=0.0,
+        waypoints=[sys_a, sys_b, sys_c],
+        current_waypoint_idx=0,
+    )
+    gs_mh1.order_queue.enqueue(sys_a, "drop_ship", order_mh1)
+
+    # Tick with dt=1.0 → first leg completes
+    evs = gs_mh1.sim_engine._tick_ships(1.0)
+
+    # Ship should now be at sys_B
+    at_b = [i for i in gs_mh1.entity_roster.at(sys_b)
+            if i.category == "ship" and i.type_value == "drop_ship"]
+    assert len(at_b) == 1 and at_b[0].count == 1, \
+        f"drop ship should be at sys_B after first leg, got {at_b}"
+    ok("drop ship moves to mid-waypoint (B) after first leg completes")
+except AssertionError as e:
+    fail("drop ship first leg -> moves to B", str(e))
+except Exception as e:
+    fail("drop ship first leg -> moves to B (exception)", str(e))
+
+try:
+    # Ship must NOT still be at sys_A
+    at_a_after = [i for i in gs_mh1.entity_roster.at(sys_a)
+                  if i.category == "ship" and i.type_value == "drop_ship"]
+    assert len(at_a_after) == 0, \
+        f"drop ship should have left sys_A, but found {at_a_after}"
+    ok("drop ship no longer at source (A) after first leg")
+except AssertionError as e:
+    fail("drop ship leaves A after first leg", str(e))
+except Exception as e:
+    fail("drop ship leaves A after first leg (exception)", str(e))
+
+try:
+    # No drop_ship_arrived event yet (not on final leg)
+    arrived_evs = [e for e in evs if e.get("type") == "drop_ship_arrived"]
+    assert len(arrived_evs) == 0, \
+        f"drop_ship_arrived should NOT be emitted after first leg, got {arrived_evs}"
+    ok("no drop_ship_arrived event after first leg")
+except AssertionError as e:
+    fail("no premature drop_ship_arrived event", str(e))
+except Exception as e:
+    fail("no premature drop_ship_arrived event (exception)", str(e))
+
+try:
+    # No constructor/miner at dest yet
+    at_c_bots = [i for i in gs_mh1.entity_roster.at(sys_c)
+                 if i.category == "bot"]
+    assert len(at_c_bots) == 0, \
+        f"no bots should be at sys_C yet, got {at_c_bots}"
+    ok("no bots spawned at final destination after first leg")
+except AssertionError as e:
+    fail("no premature bot spawn", str(e))
+except Exception as e:
+    fail("no premature bot spawn (exception)", str(e))
+
+try:
+    # Order must be re-keyed at sys_B with current_waypoint_idx=1
+    order_at_b = gs_mh1.order_queue.peek(sys_b, "drop_ship")
+    assert order_at_b is not None, "order should be re-keyed at sys_B"
+    assert order_at_b.current_waypoint_idx == 1, \
+        f"current_waypoint_idx should be 1 after advancing, got {order_at_b.current_waypoint_idx}"
+    assert order_at_b.progress == 0.0, \
+        f"progress should be reset to 0.0, got {order_at_b.progress}"
+    ok("order re-keyed at B with current_waypoint_idx=1 and progress reset")
+except AssertionError as e:
+    fail("order re-keyed at B", str(e))
+except Exception as e:
+    fail("order re-keyed at B (exception)", str(e))
+
+# Test 2: second leg completes → drop ship converts at sys_C
+try:
+    # Continue the same gs_mh1 from test 1 — ship is now at sys_B with idx=1
+    evs2 = gs_mh1.sim_engine._tick_ships(1.0)
+
+    # Constructor and Miner should appear at target_body_id or target_system_id (sys_C)
+    at_c_constructor = [i for i in gs_mh1.entity_roster.at(sys_c)
+                        if i.category == "bot" and i.type_value == "constructor"]
+    at_c_miner = [i for i in gs_mh1.entity_roster.at(sys_c)
+                  if i.category == "bot" and i.type_value == "miner"]
+    assert len(at_c_constructor) == 1 and at_c_constructor[0].count == 1, \
+        f"constructor should be at sys_C, got {at_c_constructor}"
+    assert len(at_c_miner) == 1 and at_c_miner[0].count == 1, \
+        f"miner should be at sys_C, got {at_c_miner}"
+    ok("drop ship converts to constructor + miner at final destination (C)")
+except AssertionError as e:
+    fail("drop ship conversion at final destination", str(e))
+except Exception as e:
+    fail("drop ship conversion at final destination (exception)", str(e))
+
+try:
+    arrived_evs2 = [e for e in evs2 if e.get("type") == "drop_ship_arrived"]
+    assert len(arrived_evs2) == 1, \
+        f"exactly one drop_ship_arrived event expected, got {arrived_evs2}"
+    assert arrived_evs2[0]["destination"] == sys_c, \
+        f"event destination should be sys_C, got {arrived_evs2[0]['destination']}"
+    ok("drop_ship_arrived event emitted on final leg with correct destination")
+except AssertionError as e:
+    fail("drop_ship_arrived event on final leg", str(e))
+except Exception as e:
+    fail("drop_ship_arrived event on final leg (exception)", str(e))
+
+try:
+    # Drop ship removed from sys_B on conversion
+    at_b_after = [i for i in gs_mh1.entity_roster.at(sys_b)
+                  if i.category == "ship" and i.type_value == "drop_ship"]
+    assert len(at_b_after) == 0, \
+        f"drop ship should be gone from sys_B after conversion, got {at_b_after}"
+    ok("drop ship removed from intermediate system (B) after conversion")
+except AssertionError as e:
+    fail("drop ship removed from B after conversion", str(e))
+except Exception as e:
+    fail("drop ship removed from B after conversion (exception)", str(e))
+
+# Test 3: drop ship with single-hop waypoints=[A, B] → arrives and converts immediately in one tick
+try:
+    gs_mh3 = _gs_for_ships()
+    s_home = "sys_home3"
+    s_dest = "sys_dest3"
+    gs_mh3.entity_roster.add("ship", "drop_ship", s_home, 1)
+    order_mh3 = ShipOrder(
+        order_type="travel",
+        target_system_id=s_dest,
+        target_body_id=None,
+        travel_speed=1.0,
+        progress=0.0,
+        waypoints=[s_home, s_dest],
+        current_waypoint_idx=0,
+    )
+    gs_mh3.order_queue.enqueue(s_home, "drop_ship", order_mh3)
+
+    evs3 = gs_mh3.sim_engine._tick_ships(1.0)
+
+    # Should convert immediately — constructor + miner at dest
+    at_dest_con = [i for i in gs_mh3.entity_roster.at(s_dest)
+                   if i.category == "bot" and i.type_value == "constructor"]
+    at_dest_min = [i for i in gs_mh3.entity_roster.at(s_dest)
+                   if i.category == "bot" and i.type_value == "miner"]
+    assert len(at_dest_con) == 1 and at_dest_con[0].count == 1, \
+        f"constructor should be at dest, got {at_dest_con}"
+    assert len(at_dest_min) == 1 and at_dest_min[0].count == 1, \
+        f"miner should be at dest, got {at_dest_min}"
+    ok("single-hop drop ship converts immediately on arrival (one tick)")
+except AssertionError as e:
+    fail("single-hop drop ship immediate conversion", str(e))
+except Exception as e:
+    fail("single-hop drop ship immediate conversion (exception)", str(e))
+
+try:
+    arrived3 = [e for e in evs3 if e.get("type") == "drop_ship_arrived"]
+    assert len(arrived3) == 1, \
+        f"exactly one drop_ship_arrived event for single-hop, got {arrived3}"
+    ok("single-hop drop ship emits drop_ship_arrived event")
+except AssertionError as e:
+    fail("single-hop drop_ship_arrived event", str(e))
+except Exception as e:
+    fail("single-hop drop_ship_arrived event (exception)", str(e))
+
+try:
+    # Ship removed from source on single-hop conversion
+    at_home3 = [i for i in gs_mh3.entity_roster.at(s_home)
+                if i.category == "ship" and i.type_value == "drop_ship"]
+    assert len(at_home3) == 0, \
+        f"drop ship should be gone from source after single-hop arrival, got {at_home3}"
+    ok("drop ship removed from source after single-hop arrival")
+except AssertionError as e:
+    fail("drop ship removed from source (single-hop)", str(e))
+except Exception as e:
+    fail("drop ship removed from source (single-hop) (exception)", str(e))
+
+
+# ─── _tick_power_plants: bios consumption + fossil auto-deactivation ──────────
+section("_tick_power_plants: bios / fossil consumption")
+
+from src.models.resource import Resource
+from src.models.entity import POWER_PLANT_SPECS, StructureType, compute_power_modifier
+
+
+def _home_body(gs):
+    """Return the CelestialBody for the home system's first orbital body."""
+    return gs.galaxy.solar_systems[0].orbital_bodies[0]
+
+
+# Test 1 — bio plant consumes bios resource each tick
+try:
+    gs_bpp = _fresh_gs()
+    hb1 = _home_body(gs_bpp)
+    hb1.resources.bios = 100.0
+    gs_bpp.entity_roster.add("structure", "power_plant_bios", hb1.id, 1)
+    pre_bios = hb1.resources.bios
+    gs_bpp.sim_engine._tick_power_plants(1.0)
+    post_bios = hb1.resources.bios
+    assert post_bios < pre_bios, \
+        f"bios should have been consumed; was {pre_bios}, now {post_bios}"
+    ok("bio plant consumes bios resource each tick")
+except AssertionError as e:
+    fail("bio plant consumes bios", str(e))
+except Exception as e:
+    fail("bio plant consumes bios (exception)", str(e))
+
+# Test 2 — bio plant DOES auto-deactivate when bios depletes (spec.renewable=False)
+# The bio plant is renewable=False so it follows the same deactivation logic as fossil;
+# population regenerates bios over time, allowing the plant to be reactivated externally.
+try:
+    gs_bnd = _fresh_gs()
+    hb2 = _home_body(gs_bnd)
+    hb2.resources.bios = 0.5                               # tiny — will deplete in 1 tick
+    # Remove any bio pop so regen doesn't replenish bios during this tick
+    gs_bnd.bio_state.remove(hb2.id)
+    gs_bnd.entity_roster.add("structure", "power_plant_bios", hb2.id, 1)
+    flag_key_bios = f"{hb2.id}:power_plant_bios"
+    gs_bnd.sim_engine._tick_power_plants(1.0)
+    still_active = gs_bnd.power_plant_active.get(flag_key_bios, True)
+    assert not still_active, \
+        "bio plant should auto-deactivate when bios depletes (renewable=False)"
+    ok("bio plant auto-deactivates when bios depletes (renewable=False)")
+except AssertionError as e:
+    fail("bio plant auto-deactivate on bios depletion", str(e))
+except Exception as e:
+    fail("bio plant auto-deactivate on bios depletion (exception)", str(e))
+
+# Test 3 — fossil plant auto-deactivates when gas runs to 0
+try:
+    gs_foss = _fresh_gs()
+    hb3 = _home_body(gs_foss)
+    hb3.resources.gas = 0.5                                # will deplete in 1 tick (rate=10/yr)
+    gs_foss.entity_roster.add("structure", "power_plant_fossil", hb3.id, 1)
+    flag_key_foss = f"{hb3.id}:power_plant_fossil"
+    gs_foss.sim_engine._tick_power_plants(1.0)
+    still_active_foss = gs_foss.power_plant_active.get(flag_key_foss, True)
+    assert not still_active_foss, \
+        "fossil plant should auto-deactivate when gas runs to 0"
+    ok("fossil plant auto-deactivates when gas depleted")
+except AssertionError as e:
+    fail("fossil plant auto-deactivate", str(e))
+except Exception as e:
+    fail("fossil plant auto-deactivate (exception)", str(e))
+
+
+# ─── _tick_bios: bios resource regeneration ───────────────────────────────────
+section("_tick_bios: bios regeneration from bio population")
+
+try:
+    gs_bregen = _fresh_gs()
+    hb4 = _home_body(gs_bregen)
+    hb4.resources.bios = 0.0                               # start at zero
+
+    regen_pop = BioPopulation(
+        body_id=hb4.id,
+        system_id=gs_bregen.galaxy.solar_systems[0].id,
+        bio_type=BioType.PRIMITIVE,
+        population=500.0,
+        aggression=0.1,
+        growth_rate=0.01,
+    )
+    gs_bregen.bio_state.add(regen_pop)
+    gs_bregen.sim_engine._tick_bios(1.0)
+    bios_after = hb4.resources.bios
+    assert bios_after > 0.0, \
+        f"bios should be > 0 after _tick_bios with living population, got {bios_after}"
+    ok(f"_tick_bios regenerates bios on body with bio population (got {bios_after:.2f})")
+except AssertionError as e:
+    fail("_tick_bios bios regeneration", str(e))
+except Exception as e:
+    fail("_tick_bios bios regeneration (exception)", str(e))
+
+
+# ─── compute_power_modifier: bio plant scales with bios stockpile ─────────────
+section("compute_power_modifier: bio plant bios scaling")
+
+try:
+    gs_cpm = _fresh_gs()
+    hb5 = _home_body(gs_cpm)
+    hb5.resources.bios = 10.0                              # below 50 → throttled
+    mod_low = compute_power_modifier(gs_cpm, hb5.id, "power_plant_bios")
+    assert mod_low < 1.0, \
+        f"bio modifier should be < 1.0 when bios=10, got {mod_low}"
+    ok(f"compute_power_modifier < 1.0 when bios < 50 (got {mod_low:.3f})")
+except AssertionError as e:
+    fail("compute_power_modifier bio low bios", str(e))
+except Exception as e:
+    fail("compute_power_modifier bio low bios (exception)", str(e))
+
+try:
+    gs_cpm2 = _fresh_gs()
+    hb6 = _home_body(gs_cpm2)
+    hb6.resources.bios = 50.0                              # at threshold → full output
+    mod_full = compute_power_modifier(gs_cpm2, hb6.id, "power_plant_bios")
+    # No energy_efficiency researched → research_bonus = 1.0
+    assert abs(mod_full - 1.0) < 0.001, \
+        f"bio modifier should be ~1.0 when bios=50 (no research), got {mod_full}"
+    ok(f"compute_power_modifier ~1.0 when bios >= 50, no research (got {mod_full:.3f})")
+except AssertionError as e:
+    fail("compute_power_modifier bio full bios", str(e))
+except Exception as e:
+    fail("compute_power_modifier bio full bios (exception)", str(e))
+
+try:
+    gs_cpm3 = _fresh_gs()
+    hb7 = _home_body(gs_cpm3)
+    hb7.resources.bios = 0.0                               # zero bios → zero output
+    mod_zero = compute_power_modifier(gs_cpm3, hb7.id, "power_plant_bios")
+    assert mod_zero == 0.0, \
+        f"bio modifier should be 0.0 when bios=0, got {mod_zero}"
+    ok(f"compute_power_modifier = 0.0 when bios = 0 (got {mod_zero:.3f})")
+except AssertionError as e:
+    fail("compute_power_modifier bio zero bios", str(e))
+except Exception as e:
+    fail("compute_power_modifier bio zero bios (exception)", str(e))
+
+
+# ─── BioPopulation.initial_bios save/load round-trip ─────────────────────────
+section("BioPopulation.initial_bios save/load round-trip")
+
+try:
+    gs_ibrt = _fresh_gs()
+    _ibrt_body = "ibrt_test_body"
+    _ibrt_sys = gs_ibrt.galaxy.solar_systems[0].id
+    ibrt_pop = BioPopulation(
+        body_id=_ibrt_body,
+        system_id=_ibrt_sys,
+        bio_type=BioType.PRIMITIVE,
+        population=200.0,
+        aggression=0.3,
+        growth_rate=0.02,
+        initial_bios=50.0,
+    )
+    gs_ibrt.bio_state.add(ibrt_pop)
+
+    saved_ibrt = gs_ibrt.to_dict()
+    gs_ibrt2 = GameState.from_dict(saved_ibrt, gs_ibrt.galaxy)
+
+    restored_ibrt = gs_ibrt2.bio_state.get(_ibrt_body)
+    assert restored_ibrt is not None, "population should survive round-trip"
+    assert abs(restored_ibrt.initial_bios - 50.0) < 0.001, \
+        f"initial_bios should be 50.0, got {restored_ibrt.initial_bios}"
+    ok("initial_bios=50.0 survives to_dict/from_dict round-trip")
+except AssertionError as e:
+    fail("initial_bios round-trip", str(e))
+except Exception as e:
+    fail("initial_bios round-trip (exception)", str(e))
+
+
+# ─── BioPopulation.tick: capacity scaling ────────────────────────────────────
+section("BioPopulation.tick: capacity scaling")
+
+# Full bios → full capacity → population should grow when below carrying cap
+try:
+    pop_full = BioPopulation(
+        body_id="cap_test_body",
+        system_id="any_sys",
+        bio_type=BioType.PRIMITIVE,
+        population=100.0,
+        aggression=0.1,
+        growth_rate=0.05,
+        capacity=10000.0,
+        initial_bios=100.0,
+    )
+    pop_before = pop_full.population
+    # effective_capacity = capacity * (current_bios / initial_bios) = 10000 * 1.0 = 10000
+    pop_full.tick(1.0, effective_capacity=10000.0)
+    assert pop_full.population > pop_before, \
+        f"population should grow when below full capacity; before={pop_before}, after={pop_full.population}"
+    ok("BioPopulation grows when bios=initial_bios (full effective capacity)")
+except AssertionError as e:
+    fail("capacity scaling full bios", str(e))
+except Exception as e:
+    fail("capacity scaling full bios (exception)", str(e))
+
+# Depleted bios → reduced capacity → population > effective capacity → should decrease
+try:
+    pop_dep = BioPopulation(
+        body_id="cap_dep_body",
+        system_id="any_sys",
+        bio_type=BioType.PRIMITIVE,
+        population=5000.0,
+        aggression=0.1,
+        growth_rate=0.05,
+        capacity=10000.0,
+        initial_bios=100.0,
+    )
+    # effective_capacity = 500 (5% of 10000 — simulating 5% bios remaining)
+    # population=5000 > effective_capacity=500 → dN negative → population decreases
+    pop_before_dep = pop_dep.population
+    pop_dep.tick(1.0, effective_capacity=500.0)
+    assert pop_dep.population < pop_before_dep, \
+        f"population should decline when > effective_capacity; before={pop_before_dep}, after={pop_dep.population}"
+    ok("BioPopulation declines when population > reduced effective capacity (depleted bios)")
+except AssertionError as e:
+    fail("capacity scaling depleted bios", str(e))
+except Exception as e:
+    fail("capacity scaling depleted bios (exception)", str(e))
+
+
+# ─── _tick_bios: primitive regen vs uplifted no-regen ────────────────────────
+section("_tick_bios: primitive regen vs uplifted no-regen")
+
+# Primitive regen: bios resource should increase after one tick
+try:
+    gs_preg = _fresh_gs()
+    hb_preg = _home_body(gs_preg)
+    hb_preg.resources.bios = 10.0
+    preg_pop = BioPopulation(
+        body_id=hb_preg.id,
+        system_id=gs_preg.galaxy.solar_systems[0].id,
+        bio_type=BioType.PRIMITIVE,
+        population=1000.0,
+        aggression=0.1,
+        growth_rate=0.01,
+        initial_bios=50.0,
+    )
+    # Remove any existing bio pop at this body first
+    gs_preg.bio_state.remove(hb_preg.id)
+    gs_preg.bio_state.add(preg_pop)
+    bios_before = hb_preg.resources.bios
+    gs_preg.sim_engine._tick_bios(1.0)
+    bios_after = hb_preg.resources.bios
+    assert bios_after > bios_before, \
+        f"primitive population should regenerate bios; before={bios_before}, after={bios_after}"
+    ok(f"primitive population regenerates bios resource (before={bios_before:.1f}, after={bios_after:.3f})")
+except AssertionError as e:
+    fail("primitive bios regen", str(e))
+except Exception as e:
+    fail("primitive bios regen (exception)", str(e))
+
+# Uplifted no-regen: bios should NOT increase (stays same or decreases with plant consumption)
+try:
+    gs_unoreg = _fresh_gs()
+    hb_unoreg = _home_body(gs_unoreg)
+    hb_unoreg.resources.bios = 10.0
+    unoreg_pop = BioPopulation(
+        body_id=hb_unoreg.id,
+        system_id=gs_unoreg.galaxy.solar_systems[0].id,
+        bio_type=BioType.UPLIFTED,
+        population=1000.0,
+        aggression=0.1,
+        growth_rate=0.01,
+        initial_bios=50.0,
+    )
+    gs_unoreg.bio_state.remove(hb_unoreg.id)
+    gs_unoreg.bio_state.add(unoreg_pop)
+    bios_before_u = hb_unoreg.resources.bios
+    gs_unoreg.sim_engine._tick_bios(1.0)
+    bios_after_u = hb_unoreg.resources.bios
+    # Uplifted population should NOT add bios; value stays the same (no power plant here)
+    assert bios_after_u == bios_before_u, \
+        f"uplifted population should NOT regenerate bios; before={bios_before_u}, after={bios_after_u}"
+    ok("uplifted population does not regenerate bios resource")
+except AssertionError as e:
+    fail("uplifted no bios regen", str(e))
+except Exception as e:
+    fail("uplifted no bios regen (exception)", str(e))
+
+
+# ─── _tick_bios: extinction event ────────────────────────────────────────────
+section("_tick_bios: extinction event and BioState.remove()")
+
+# Extinction: bios=0 + population<=2 + initial_bios > 0 → bios_extinction event + pop removed
+try:
+    gs_ext = _fresh_gs()
+    hb_ext = _home_body(gs_ext)
+    hb_ext.resources.bios = 0.0
+    ext_pop = BioPopulation(
+        body_id=hb_ext.id,
+        system_id=gs_ext.galaxy.solar_systems[0].id,
+        bio_type=BioType.PRIMITIVE,
+        population=1.5,   # <= 2.0 threshold
+        aggression=0.1,
+        growth_rate=0.01,
+        initial_bios=50.0,  # > 0 required for extinction check
+    )
+    gs_ext.bio_state.remove(hb_ext.id)
+    gs_ext.bio_state.add(ext_pop)
+    evs_ext = gs_ext.sim_engine._tick_bios(1.0)
+    ext_evs = [e for e in evs_ext if e.get("type") == "bios_extinction"]
+    assert len(ext_evs) >= 1, \
+        f"bios_extinction event should be emitted when bios=0 and pop<=2; events={evs_ext}"
+    assert ext_evs[0].get("body_id") == hb_ext.id, \
+        f"event body_id should match; got {ext_evs[0].get('body_id')}"
+    assert gs_ext.bio_state.get(hb_ext.id) is None, \
+        "population should be removed from bio_state after extinction"
+    ok("bios_extinction event emitted and population removed when bios=0 and pop<=2")
+except AssertionError as e:
+    fail("bios_extinction event", str(e))
+except Exception as e:
+    fail("bios_extinction event (exception)", str(e))
+
+# BioState.remove() removes a population by body_id
+try:
+    bs_test = BioState()
+    rm_pop = BioPopulation(
+        body_id="rm_test_body",
+        system_id="rm_sys",
+        bio_type=BioType.PRIMITIVE,
+        population=100.0,
+        aggression=0.1,
+        growth_rate=0.02,
+    )
+    bs_test.add(rm_pop)
+    assert bs_test.get("rm_test_body") is not None, "population should exist before remove()"
+    bs_test.remove("rm_test_body")
+    assert bs_test.get("rm_test_body") is None, "population should be None after remove()"
+    ok("BioState.remove() removes population by body_id")
+except AssertionError as e:
+    fail("BioState.remove()", str(e))
+except Exception as e:
+    fail("BioState.remove() (exception)", str(e))
+
+# BioState.remove() is idempotent (removing non-existent key does not raise)
+try:
+    bs_test2 = BioState()
+    bs_test2.remove("nonexistent_body")   # should not raise
+    ok("BioState.remove() is idempotent for non-existent body_id")
+except Exception as e:
+    fail("BioState.remove() idempotent", str(e))
+
+
+# ─── _tick_power_plants: bios consumption (detailed) ─────────────────────────
+section("_tick_power_plants: bio plant consumes bios (renewable=False)")
+
+# Bio plant (power_plant_bios) has renewable=False → consumes bios resource each tick
+try:
+    gs_bpdet = _fresh_gs()
+    hb_bpdet = _home_body(gs_bpdet)
+    hb_bpdet.resources.bios = 100.0
+    # Remove any existing bio pop to avoid regen masking consumption
+    gs_bpdet.bio_state.remove(hb_bpdet.id)
+    gs_bpdet.entity_roster.add("structure", "power_plant_bios", hb_bpdet.id, 1)
+    bios_pre = hb_bpdet.resources.bios
+    gs_bpdet.sim_engine._tick_power_plants(1.0)
+    bios_post = hb_bpdet.resources.bios
+    assert bios_post < bios_pre, \
+        f"bio plant should consume bios (renewable=False); before={bios_pre}, after={bios_post}"
+    ok(f"power_plant_bios consumes bios resource (before={bios_pre:.1f}, after={bios_post:.1f})")
+except AssertionError as e:
+    fail("bio plant bios consumption detail", str(e))
+except Exception as e:
+    fail("bio plant bios consumption detail (exception)", str(e))
 
 
 # ─── Summary ─────────────────────────────────────────────────────────────────

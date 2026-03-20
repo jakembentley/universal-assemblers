@@ -117,7 +117,7 @@ POWER_PLANT_SPECS: dict[StructureType, PowerPlantSpec] = {
     StructureType.POWER_PLANT_BIOS: PowerPlantSpec(
         name="Bio Plant",
         base_output=60.0,
-        renewable=True,
+        renewable=False,        # consumes bios; population regenerates it → net renewable
         input_resource="bios",
         input_rate=8.0,
         requires_resource="bios",
@@ -251,8 +251,17 @@ def compute_power_modifier(gs, body_id: str, plant_type_value: str) -> float:
         return atm * research_bonus
 
     if plant_type_value == "power_plant_bios":
-        # Need bios resource — look it up from roster/body
-        # Without galaxy access here we return a neutral 1.0; caller may override
+        # Scale output linearly with available bios stockpile; full output at 50+ units
+        if hasattr(gs, "galaxy") and gs.galaxy:
+            for sys in gs.galaxy.solar_systems:
+                for b in sys.orbital_bodies:
+                    if b.id == body_id:
+                        bios = getattr(b.resources, "bios", 0.0)
+                        return min(1.0, bios / 50.0) * research_bonus
+                    for m in b.moons:
+                        if m.id == body_id:
+                            bios = getattr(m.resources, "bios", 0.0)
+                            return min(1.0, bios / 50.0) * research_bonus
         return research_bonus
 
     # Fossil, nuclear, cold fusion, dark matter — stable, just research
