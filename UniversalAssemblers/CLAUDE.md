@@ -48,9 +48,9 @@ Git log is the primary context recovery mechanism. Every session that implements
 ```
 <type>(<scope>): <what was done — ≤ 72 chars>
 
-Why: <reason / user story>
-What: <2–5 bullet points of key changes>
-State: <"X done. Next: Y">
+Why: <one phrase or sentence>
+What: <2-3 tight bullets>
+Next: <what comes after>
 
 Files: <key files changed>
 ```

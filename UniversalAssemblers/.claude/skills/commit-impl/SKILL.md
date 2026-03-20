@@ -12,11 +12,11 @@ This commit is the primary source of context for future Claude sessions and suba
 ```
 <type>(<scope>): <what was done — one line, ≤ 72 chars>
 
-Why: <1-2 sentences on the reason / user story / design decision>
-What: <2-5 bullet points of the key changes>
-State: <"X is now done. Next: Y" — where in the impl plan we are>
+Why: <one phrase or sentence>
+What: <2-3 tight bullets — one key fact each>
+Next: <what comes after>
 
-Files: <comma-separated list of the key files changed>
+Files: <key files, comma-separated>
 ```
 
 ### Types
@@ -32,16 +32,14 @@ Use the primary module or feature area: `entity-view`, `tech-tree`, `game-state`
 ## Example
 
 ```
-feat(overlay): add QueueView task queue overlay and tooltip system
+feat(overlay): add QueueView overlay and tooltip system
 
-Why: Player needed a global view of all bot/factory/shipyard task queues
-     to monitor progress without clicking into each entity.
+Why: Player needs a global view of all task queues without clicking each entity.
 What:
-  - QueueView: filterable overlay showing bot tasks, factory tasks, shipyard queues
-  - Tooltip: 420ms hover delay system; hover-ID change detection resets timer
-  - App.open_queue_view(): mutual exclusion enforced across all overlays
-  - ESC priority: queue_view > energy_view > tech_view > entity_view > pause_menu
-State: Overlay system complete (tech/energy/queue/entity). Next: orbital structure icon on map.
+  - QueueView: filterable overlay for bot/factory/shipyard queues
+  - Tooltip: 420ms hover delay; hover-ID change resets timer
+  - ESC priority: queue_view > energy_view > tech_view > entity_view
+Next: orbital structure icon on map.
 
 Files: src/gui/queue_view.py, src/gui/tooltip.py, src/gui/app.py, src/gui/taskbar.py
 ```
