@@ -1371,6 +1371,291 @@ except Exception as e:
     fail("bio plant bios consumption detail (exception)", str(e))
 
 
+# ─── _tick_power_plants: resource_depleted event ─────────────────────────────
+section("_tick_power_plants: resource_depleted event emission")
+
+# When a non-renewable plant drains its fuel to exactly 0 in one tick, a
+# resource_depleted event should be emitted.
+try:
+    gs_evdp = _fresh_gs()
+    hb_evdp = _home_body(gs_evdp)
+    hb_evdp.resources.gas = 0.5            # tiny amount; rate=10/yr → drained in 1 tick
+    gs_evdp.entity_roster.add("structure", "power_plant_fossil", hb_evdp.id, 1)
+    evs_dp = gs_evdp.sim_engine._tick_power_plants(1.0)
+    depleted_evs = [e for e in evs_dp if e.get("type") == "resource_depleted"]
+    assert len(depleted_evs) >= 1, \
+        f"resource_depleted event should fire when gas hits 0; events={evs_dp}"
+    assert depleted_evs[0].get("resource") == "gas", \
+        f"event resource should be 'gas', got {depleted_evs[0].get('resource')}"
+    ok("_tick_power_plants emits resource_depleted event when fossil fuel hits 0")
+except AssertionError as e:
+    fail("resource_depleted event on fossil depletion", str(e))
+except Exception as e:
+    fail("resource_depleted event on fossil depletion (exception)", str(e))
+
+try:
+    # resource_depleted_plant event also emitted for non-renewable deactivation
+    plant_evs = [e for e in evs_dp if e.get("type") == "resource_depleted_plant"]
+    assert len(plant_evs) >= 1, \
+        f"resource_depleted_plant event should fire when non-renewable fuel hits 0; events={evs_dp}"
+    assert plant_evs[0].get("plant_type") == "power_plant_fossil", \
+        f"plant_type should be 'power_plant_fossil', got {plant_evs[0].get('plant_type')}"
+    ok("_tick_power_plants emits resource_depleted_plant event for fossil deactivation")
+except AssertionError as e:
+    fail("resource_depleted_plant event", str(e))
+except Exception as e:
+    fail("resource_depleted_plant event (exception)", str(e))
+
+
+# ─── compute_power_modifier: energy_efficiency research bonus ─────────────────
+section("compute_power_modifier: energy_efficiency research bonus")
+
+try:
+    gs_ee = _fresh_gs()
+    hb_ee = _home_body(gs_ee)
+    hb_ee.resources.bios = 50.0            # full output before bonus
+    # Without research: modifier should be ~1.0
+    mod_no_ee = compute_power_modifier(gs_ee, hb_ee.id, "power_plant_bios")
+    # Grant energy_efficiency
+    gs_ee.tech.researched.add("energy_efficiency")
+    mod_with_ee = compute_power_modifier(gs_ee, hb_ee.id, "power_plant_bios")
+    assert abs(mod_no_ee - 1.0) < 0.001, \
+        f"bio modifier without research should be ~1.0, got {mod_no_ee}"
+    assert abs(mod_with_ee - 1.25) < 0.001, \
+        f"bio modifier with energy_efficiency should be ~1.25, got {mod_with_ee}"
+    ok(f"compute_power_modifier applies +25% research bonus for energy_efficiency (got {mod_with_ee:.3f})")
+except AssertionError as e:
+    fail("compute_power_modifier energy_efficiency bonus", str(e))
+except Exception as e:
+    fail("compute_power_modifier energy_efficiency bonus (exception)", str(e))
+
+try:
+    # solar modifier also scales with energy_efficiency
+    gs_ee2 = _fresh_gs()
+    hb_ee2 = _home_body(gs_ee2)
+    mod_solar_base = compute_power_modifier(gs_ee2, hb_ee2.id, "power_plant_solar")
+    gs_ee2.tech.researched.add("energy_efficiency")
+    mod_solar_ee = compute_power_modifier(gs_ee2, hb_ee2.id, "power_plant_solar")
+    assert mod_solar_ee > mod_solar_base, \
+        f"solar modifier with energy_efficiency ({mod_solar_ee:.3f}) should exceed base ({mod_solar_base:.3f})"
+    ratio = mod_solar_ee / max(mod_solar_base, 1e-9)
+    assert abs(ratio - 1.25) < 0.01, \
+        f"energy_efficiency should give exactly 1.25x; ratio={ratio:.3f}"
+    ok(f"compute_power_modifier solar scales 1.25x with energy_efficiency (ratio={ratio:.3f})")
+except AssertionError as e:
+    fail("compute_power_modifier solar energy_efficiency bonus", str(e))
+except Exception as e:
+    fail("compute_power_modifier solar energy_efficiency bonus (exception)", str(e))
+
+
+# ─── BioPopulation.tick: population floor ────────────────────────────────────
+section("BioPopulation.tick: population floor at 1.0")
+
+try:
+    # Population at exactly 1.0, tiny negative growth rate → should stay at 1.0 (floor)
+    pop_floor = BioPopulation(
+        body_id="floor_body",
+        system_id="any_sys",
+        bio_type=BioType.PRIMITIVE,
+        population=1.0,
+        aggression=0.1,
+        growth_rate=0.5,      # high rate but K=1 → (1-N/K)=0 → dN=0 → stays 1.0
+        capacity=1.0,
+        initial_bios=0.0,
+    )
+    pop_floor.tick(1.0)
+    assert pop_floor.population >= 1.0, \
+        f"population should never drop below 1.0, got {pop_floor.population}"
+    ok("BioPopulation.tick respects minimum population floor of 1.0")
+except AssertionError as e:
+    fail("BioPopulation population floor", str(e))
+except Exception as e:
+    fail("BioPopulation population floor (exception)", str(e))
+
+try:
+    # Over-capacity scenario with very small effective capacity → population still >= 1.0
+    pop_over = BioPopulation(
+        body_id="over_body",
+        system_id="any_sys",
+        bio_type=BioType.PRIMITIVE,
+        population=2.0,
+        aggression=0.1,
+        growth_rate=2.0,      # aggressive decline when over-capacity
+        capacity=10000.0,
+        initial_bios=100.0,
+    )
+    # Effective capacity of 1 → huge over-capacity → negative dN; floor should apply
+    pop_over.tick(10.0, effective_capacity=1.0)
+    assert pop_over.population >= 1.0, \
+        f"population should never go below 1.0 even with extreme negative growth, got {pop_over.population}"
+    ok("BioPopulation floor applies even with extreme negative growth (effective_capacity=1)")
+except AssertionError as e:
+    fail("BioPopulation floor extreme negative growth", str(e))
+except Exception as e:
+    fail("BioPopulation floor extreme negative growth (exception)", str(e))
+
+
+# ─── _tick_bios: bios regen cap at initial_bios * 2.0 ────────────────────────
+section("_tick_bios: bios regeneration cap at initial_bios * 2.0")
+
+try:
+    gs_cap = _fresh_gs()
+    hb_cap = _home_body(gs_cap)
+    # Set bios very close to cap so one tick's regen should not overshoot
+    initial_bios_val = 50.0
+    hb_cap.resources.bios = initial_bios_val * 2.0 - 0.001   # just under cap
+    cap_pop = BioPopulation(
+        body_id=hb_cap.id,
+        system_id=gs_cap.galaxy.solar_systems[0].id,
+        bio_type=BioType.PRIMITIVE,
+        population=100000.0,   # large pop → large regen per tick
+        aggression=0.1,
+        growth_rate=0.01,
+        initial_bios=initial_bios_val,
+    )
+    gs_cap.bio_state.remove(hb_cap.id)
+    gs_cap.bio_state.add(cap_pop)
+    gs_cap.sim_engine._tick_bios(1.0)
+    bios_final = hb_cap.resources.bios
+    expected_cap = initial_bios_val * 2.0
+    assert bios_final <= expected_cap + 0.001, \
+        f"bios should not exceed initial_bios*2={expected_cap:.1f}; got {bios_final:.3f}"
+    ok(f"bios regen capped at initial_bios*2.0 (cap={expected_cap:.1f}, got={bios_final:.4f})")
+except AssertionError as e:
+    fail("bios regen cap", str(e))
+except Exception as e:
+    fail("bios regen cap (exception)", str(e))
+
+
+# ─── _tick_bios: no extinction when initial_bios=0 ───────────────────────────
+section("_tick_bios: extinction guard — no event when initial_bios=0")
+
+try:
+    gs_noext = _fresh_gs()
+    hb_noext = _home_body(gs_noext)
+    hb_noext.resources.bios = 0.0
+    # Population with initial_bios=0 — extinction condition should NOT fire
+    noext_pop = BioPopulation(
+        body_id=hb_noext.id,
+        system_id=gs_noext.galaxy.solar_systems[0].id,
+        bio_type=BioType.PRIMITIVE,
+        population=1.0,    # critically low, same as extinction test
+        aggression=0.1,
+        growth_rate=0.01,
+        initial_bios=0.0,  # <-- key: no initial bios → no extinction check
+    )
+    gs_noext.bio_state.remove(hb_noext.id)
+    gs_noext.bio_state.add(noext_pop)
+    evs_noext = gs_noext.sim_engine._tick_bios(1.0)
+    ext_evs_noext = [e for e in evs_noext if e.get("type") == "bios_extinction"]
+    assert len(ext_evs_noext) == 0, \
+        f"bios_extinction should NOT fire when initial_bios=0; events={ext_evs_noext}"
+    # Population should still be present
+    assert gs_noext.bio_state.get(hb_noext.id) is not None, \
+        "population should remain alive when initial_bios=0 (no extinction rule applies)"
+    ok("bios_extinction NOT emitted when initial_bios=0 (even with bios=0 and pop<=2)")
+except AssertionError as e:
+    fail("no extinction when initial_bios=0", str(e))
+except Exception as e:
+    fail("no extinction when initial_bios=0 (exception)", str(e))
+
+
+# ─── power_plant_active save/load round-trip ─────────────────────────────────
+section("power_plant_active save/load round-trip")
+
+try:
+    gs_ppa = _fresh_gs()
+    hb_ppa = _home_body(gs_ppa)
+    # Manually mark a bio plant as deactivated
+    flag_key_ppa = f"{hb_ppa.id}:power_plant_bios"
+    gs_ppa.power_plant_active[flag_key_ppa] = False
+
+    d_ppa = gs_ppa.to_dict()
+    gs_ppa2 = GameState.from_dict(d_ppa, gs_ppa.galaxy)
+
+    restored_active = gs_ppa2.power_plant_active.get(flag_key_ppa, True)
+    assert not restored_active, \
+        f"deactivated plant flag should survive round-trip; got {restored_active}"
+    ok("power_plant_active=False survives to_dict/from_dict round-trip")
+except AssertionError as e:
+    fail("power_plant_active round-trip", str(e))
+except Exception as e:
+    fail("power_plant_active round-trip (exception)", str(e))
+
+try:
+    # Active plant (True) also survives
+    gs_ppa3 = _fresh_gs()
+    hb_ppa3 = _home_body(gs_ppa3)
+    flag_key_ppa3 = f"{hb_ppa3.id}:power_plant_solar"
+    gs_ppa3.power_plant_active[flag_key_ppa3] = True
+
+    d_ppa3 = gs_ppa3.to_dict()
+    gs_ppa3_loaded = GameState.from_dict(d_ppa3, gs_ppa3.galaxy)
+
+    assert gs_ppa3_loaded.power_plant_active.get(flag_key_ppa3, False) is True, \
+        "active plant flag (True) should survive round-trip"
+    ok("power_plant_active=True survives to_dict/from_dict round-trip")
+except AssertionError as e:
+    fail("power_plant_active=True round-trip", str(e))
+except Exception as e:
+    fail("power_plant_active=True round-trip (exception)", str(e))
+
+
+# ─── is_probed vs can_enter ───────────────────────────────────────────────────
+section("GameState.is_probed and can_enter use probed_systems set")
+
+try:
+    gs_ip = _fresh_gs()
+    home_ip = gs_ip.galaxy.solar_systems[0].id
+    # Home system is in probed_systems by default
+    assert gs_ip.is_probed(home_ip), \
+        "home system should be in probed_systems on new game"
+    assert gs_ip.can_enter(home_ip), \
+        "can_enter should return True for home system (probed)"
+    ok("is_probed and can_enter both True for home system")
+except AssertionError as e:
+    fail("is_probed home system", str(e))
+except Exception as e:
+    fail("is_probed home system (exception)", str(e))
+
+try:
+    gs_ip2 = _fresh_gs()
+    all_ids_ip = [s.id for s in gs_ip2.galaxy.solar_systems]
+    non_home_ip = [sid for sid in all_ids_ip if sid != gs_ip2.galaxy.solar_systems[0].id]
+    if non_home_ip:
+        foreign = non_home_ip[0]
+        assert not gs_ip2.is_probed(foreign), \
+            "non-home system should NOT be in probed_systems initially"
+        assert not gs_ip2.can_enter(foreign), \
+            "can_enter should return False for unprobed system"
+        ok("is_probed and can_enter both False for unvisited non-home system")
+    else:
+        ok("is_probed non-home skipped (single-system galaxy)")
+except AssertionError as e:
+    fail("is_probed non-home system", str(e))
+except Exception as e:
+    fail("is_probed non-home system (exception)", str(e))
+
+try:
+    # Adding a system to probed_systems makes can_enter return True
+    gs_ip3 = _fresh_gs()
+    all_ids_ip3 = [s.id for s in gs_ip3.galaxy.solar_systems]
+    non_home_ip3 = [sid for sid in all_ids_ip3
+                    if sid != gs_ip3.galaxy.solar_systems[0].id]
+    if non_home_ip3:
+        probe_target = non_home_ip3[0]
+        assert not gs_ip3.can_enter(probe_target), "should not be enterable before probing"
+        gs_ip3.probed_systems.add(probe_target)
+        assert gs_ip3.can_enter(probe_target), "should be enterable after adding to probed_systems"
+        ok("can_enter reflects probed_systems membership dynamically")
+    else:
+        ok("probed_systems dynamic check skipped (single-system galaxy)")
+except AssertionError as e:
+    fail("can_enter dynamic probed_systems", str(e))
+except Exception as e:
+    fail("can_enter dynamic probed_systems (exception)", str(e))
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")
