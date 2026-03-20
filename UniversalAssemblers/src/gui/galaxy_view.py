@@ -208,8 +208,6 @@ class GalaxyView:
         state = gs.get_state(hit_id)
 
         if state == DiscoveryState.DETECTED:
-            gs.discover_system(hit_id)
-            self._fog_dirty = True
             self._selected_id = hit_id
 
         elif state in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
@@ -525,7 +523,7 @@ class GalaxyView:
                     f"  Pl:{sys.num_planets}  Co:{sys.num_comets}  As:{sys.num_asteroids}"
                 )
             elif sys and state == DiscoveryState.DETECTED:
-                label = "SELECTED: ??? (scan to reveal)"
+                label = "SELECTED: ??? — send a Probe to explore"
             else:
                 label = "Select a system"
         else:

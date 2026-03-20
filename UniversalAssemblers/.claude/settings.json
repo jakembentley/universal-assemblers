@@ -25,17 +25,12 @@
             "type": "command",
             "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/run_lint.sh",
             "timeout": 30000
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
+          },
           {
-            "type": "command",
-            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/test_and_push.sh",
-            "timeout": 60000
+            "type": "agent",
+            "prompt": "You are the test-updater agent for the Universal Assemblers game (Python/pygame, located at /c/Users/Admin/code/UniversalAssemblers/).\n\nHook input JSON: $ARGUMENTS\n\nExtract the file path from tool_input.file_path.\n\nOnly proceed if ALL of the following are true:\n- The path contains 'UniversalAssemblers/src/' or 'UniversalAssemblers\\\\src\\\\'\n- The path does NOT contain 'UniversalAssemblers/src/gui' or 'UniversalAssemblers\\\\src\\\\gui'\n\nIf those conditions are not met, exit silently without doing anything.\n\nFor qualifying files (src/models/, src/game_state.py, src/generator.py, src/simulation.py):\n1. Read the changed file to understand what logic was added or modified\n2. Read /c/Users/Admin/code/UniversalAssemblers/scripts/unit_tests.py\n3. Add or update test assertions covering the changed logic — focus on model methods, game state transitions, generator determinism, and simulation tick outputs\n4. Write the updated unit_tests.py\n5. Run: /c/Users/Admin/anaconda3/python.exe /c/Users/Admin/code/UniversalAssemblers/scripts/unit_tests.py\n6. Report back: which tests were added/updated, pass/fail counts, and any failures with tracebacks",
+            "timeout": 120,
+            "statusMessage": "test-updater: checking src/ changes..."
           }
         ]
       }

@@ -281,8 +281,25 @@ class EntityView:
                     if state not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
                         color = (90, 120, 160)
                     items.append((f"{s.name}{dist_str}", s.id, color))
+        elif self._type_value == "drop_ship" and self._system_id:
+            # Drop ships: any reachable (non-warp) discovered/colonized system; ETA by hop count
+            from ..simulation import SHIP_SPEEDS
+            spd = SHIP_SPEEDS.get("drop_ship", 0.20)
+            items = []
+            for s in galaxy.solar_systems:
+                if s.id == self._system_id or s.warp_only:
+                    continue
+                if gs.get_state(s.id) not in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
+                    continue
+                path = gs.shortest_path(self._system_id, s.id)
+                hops = len(path) - 1
+                eta_years = hops / spd if spd > 0 else 0
+                hop_lbl = f"{hops} hop{'s' if hops != 1 else ''}"
+                dist_str = f" [{hop_lbl} | ~{eta_years:.0f}yr]"
+                items.append((f"{s.name}{dist_str}", s.id, None))
+            self._sys_list.set_items(items)
         else:
-            # All other ships: any discovered/colonized system; show ETA
+            # All other ships: any discovered/colonized system; show ETA (single leg)
             from ..simulation import SHIP_SPEEDS
             spd = SHIP_SPEEDS.get(self._type_value, 0.25)
             eta_years = 1.0 / spd
@@ -1422,9 +1439,18 @@ class EntityView:
                 # Show body docking target if present
                 if order.target_body_id and order.target_body_id != order.target_system_id:
                     dest_str += "  (body)"
-                prog_str = f"{order.progress:.0%}"
-                eta_frac = 1.0 - order.progress
-                eta_yr = eta_frac / max(order.travel_speed, 0.01)
+                # For multi-hop journeys, show current leg and remaining ETA
+                waypoints = order.waypoints
+                if waypoints and len(waypoints) > 2:
+                    total_hops  = len(waypoints) - 1
+                    cur_hop     = order.current_waypoint_idx + 1
+                    legs_left   = total_hops - order.current_waypoint_idx
+                    eta_yr      = (legs_left - order.progress) / max(order.travel_speed, 0.01)
+                    prog_str    = f"hop {cur_hop}/{total_hops}  {order.progress:.0%}"
+                else:
+                    eta_frac = 1.0 - order.progress
+                    eta_yr   = eta_frac / max(order.travel_speed, 0.01)
+                    prog_str = f"{order.progress:.0%}"
                 row_col = C_ACCENT if i == 0 else C_TEXT_DIM
                 if cy >= content_top - ROW_H and cy < self._rect.bottom:
                     row_s = font(12).render(
@@ -1581,10 +1607,47 @@ class EntityView:
             surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
             cy += ROW_H
 
+        from ..simulation import _BIOS_REGEN_PER_POP
+
+        # Resolve body for current bios level
+        body = None
+        if gs.galaxy and loc:
+            for sys in gs.galaxy.solar_systems:
+                for b in sys.orbital_bodies:
+                    if b.id == loc:
+                        body = b
+                        break
+                    for m in b.moons:
+                        if m.id == loc:
+                            body = m
+                            break
+                if body:
+                    break
+        current_bios = getattr(getattr(body, "resources", None), "bios", None)
+
+        # Effective carrying capacity (may be reduced when bios is depleted)
+        if pop.initial_bios > 0 and current_bios is not None:
+            bios_frac = min(1.0, current_bios / pop.initial_bios)
+            eff_capacity = max(1.0, pop.capacity * bios_frac)
+        else:
+            eff_capacity = pop.capacity
+        cap_pct = pop.population / eff_capacity if eff_capacity > 0 else 0.0
+
+        # Color by type
+        is_uplifted = pop.bio_type.value == "uplifted"
+        pop_col = (255, 80, 80) if is_uplifted else (80, 200, 100)
+        cap_col = C_WARN if cap_pct > 0.85 else C_TEXT
+
         txt("Type",        pop.bio_type.value.capitalize())
-        txt("Population",  f"{pop.population:,.0f}",
-            (255, 80, 80) if pop.bio_type.value == "uplifted" else (80, 200, 100))
+        txt("Population",  f"{pop.population:,.0f}", pop_col)
+        txt("Capacity",    f"{pop.population / eff_capacity:.0%} of {eff_capacity:,.0f}", cap_col)
         txt("Aggression",  f"{pop.aggression:.0%}",
             C_WARN if pop.aggression > 0.65 else C_TEXT)
         txt("Growth rate", f"{pop.growth_rate:.1%}/yr")
+        if not is_uplifted:
+            regen_yr = pop.population * _BIOS_REGEN_PER_POP
+            txt("Bios regen",  f"+{regen_yr:.1f}/yr", (80, 200, 100))
+        if current_bios is not None:
+            bios_col = C_WARN if (current_bios < (pop.initial_bios * 0.25)) else C_TEXT
+            txt("Bios stock",  f"{current_bios:.1f}", bios_col)
         return cy
