@@ -381,6 +381,11 @@ class EntityView:
         for event in events:
             self._close_btn.handle_event(event)
 
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                if self._rect.collidepoint(event.pos):
+                    self._close()
+                    return
+
             if event.type == pygame.MOUSEWHEEL and self._rect.collidepoint(pygame.mouse.get_pos()):
                 if self._category == "bot":
                     gs = self.app.game_state

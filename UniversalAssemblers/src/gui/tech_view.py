@@ -89,6 +89,10 @@ class TechView:
         for event in events:
             self._close_btn.handle_event(event)
 
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                self._close()
+                return
+
             if event.type == pygame.MOUSEWHEEL:
                 self._scroll_y = max(0, min(self._max_scroll,
                                             self._scroll_y - event.y * 30))

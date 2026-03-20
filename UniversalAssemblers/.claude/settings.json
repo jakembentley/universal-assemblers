@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/write_smoke_tests.sh",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/run_smoke_tests.sh",
+            "timeout": 30000
+          },
+          {
+            "type": "command",
+            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/run_lint.sh",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/sydmb/universal-assemblers/UniversalAssemblers/scripts/test_and_push.sh",
+            "timeout": 60000
+          }
+        ]
+      }
+    ]
+  }
+}

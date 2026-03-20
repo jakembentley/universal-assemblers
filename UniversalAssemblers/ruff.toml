@@ -1,0 +1,26 @@
+# Ruff linting config for Universal Assemblers
+# https://docs.astral.sh/ruff/configuration/
+
+[lint]
+# Rules enabled: pyflakes (F) + pycodestyle (E/W) subset
+select = ["F", "E", "W"]
+
+ignore = [
+    "E501",   # line too long — many constant defs and layout math are intentionally wide
+    "E402",   # module level import not at top — sys.path.insert pattern in test scripts
+    "E741",   # ambiguous variable name — 'l', 'O' etc used in math/layout
+    "W291",   # trailing whitespace — handled by editor
+    "W293",   # whitespace before ':' — handled by editor
+]
+
+# Don't lint auto-generated files
+exclude = [
+    "scripts/smoke_tests.py",
+    "build/",
+    "dist/",
+    "__pycache__/",
+]
+
+[lint.per-file-ignores]
+# Test scripts use bare asserts and star imports — relax there
+"scripts/unit_tests.py" = ["F841"]

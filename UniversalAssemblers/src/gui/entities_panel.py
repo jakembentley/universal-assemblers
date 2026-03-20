@@ -72,6 +72,22 @@ class EntitiesPanel:
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
+            if event.type == pygame.MOUSEMOTION:
+                if self.rect.collidepoint(event.pos):
+                    hit = next(
+                        ((cat, tv) for r, cat, tv in self._hit_rects
+                         if r.collidepoint(event.pos)),
+                        None,
+                    )
+                    if hit:
+                        cat, tv = hit
+                        lines = self._build_entity_tooltip(cat, tv)
+                        self.app.tooltip.set_hover(f"ent:{tv}", lines, event.pos)
+                    else:
+                        self.app.tooltip.clear_hover()
+                else:
+                    self.app.tooltip.clear_hover()
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for rect, category, type_val in self._hit_rects:
                     if rect.collidepoint(event.pos):
@@ -180,3 +196,76 @@ class EntitiesPanel:
                 surface.blit(count_surf, (cx + col_w - PADDING - count_surf.get_width(), row_y))
 
                 row_y += row_h
+
+    # ------------------------------------------------------------------
+    # Tooltip helper
+
+    _ENTITY_DESCS: dict[str, str] = {
+        "extractor":                 "Mines raw minerals, ice and gas from deposits.",
+        "factory":                   "Manufactures electronics, alloys and components.",
+        "power_plant_solar":         "Generates clean energy from stellar radiation.",
+        "power_plant_wind":          "Generates energy from atmospheric winds.",
+        "power_plant_bios":          "Burns biological material for energy.",
+        "power_plant_fossil":        "Burns fossil fuels; resource depletes over time.",
+        "power_plant_nuclear":       "Splits atomic nuclei for abundant power.",
+        "power_plant_cold_fusion":   "Fusion at ambient temperatures — no fuel consumed.",
+        "power_plant_dark_matter":   "Harnesses exotic dark matter interactions.",
+        "research_array":            "Generates research points for tech unlocks.",
+        "replicator":                "Autonomously self-replicates new structures.",
+        "shipyard":                  "Constructs and launches spacecraft.",
+        "storage_hub":               "Stores accumulated resources on-site.",
+        "miner":                     "Extracts minerals, ice and gas from surface.",
+        "constructor":               "Builds structures and other entities on order.",
+        "logistic_bot":              "Transports resources between bodies.",
+        "harvester":                 "Harvests biological resources.",
+        "probe":                     "Explores and reveals unknown star systems.",
+        "drop_ship":                 "Delivers constructor + miner bots to a target.",
+        "mining_vessel":             "Extracts resources from remote bodies.",
+        "transport":                 "Ferries resources between star systems.",
+        "warship":                   "Combat vessel for hostile encounters.",
+    }
+
+    def _build_entity_tooltip(
+        self, category: str, type_val: str
+    ) -> list[tuple[str, tuple]]:
+        from .constants import C_ACCENT, C_TEXT_DIM, C_WARN
+        gs      = self.app.game_state
+        sys_    = self.app.selected_system
+        body_id = self.app.selected_body_id
+
+        name = type_val.replace("_", " ").title()
+        # Use the display name from the column registry if available
+        for _, cat, types, _ in _COLUMNS:
+            if cat == category:
+                for tv, n, _ in types:
+                    if tv == type_val:
+                        name = n
+                        break
+
+        lines: list[tuple[str, tuple]] = []
+        lines.append((name, C_ACCENT))
+
+        desc = self._ENTITY_DESCS.get(type_val)
+        if desc:
+            lines.append((desc, C_TEXT_DIM))
+
+        if gs:
+            total = gs.entity_roster.total(category, type_val)
+            if category == "ship":
+                here_loc = sys_.id if sys_ else None
+            else:
+                here_loc = body_id or (sys_.id if sys_ else None)
+            here = (
+                sum(i.count for i in gs.entity_roster.at(here_loc or "")
+                    if i.category == category and i.type_value == type_val)
+                if here_loc else 0
+            )
+            lines.append((f"Here: {here}   Total: {total}", C_TEXT_DIM))
+
+            # Energy consumption
+            from ..models.entity import ENERGY_CONSUMPTION
+            ec = ENERGY_CONSUMPTION.get(type_val, 0.0)
+            if ec > 0:
+                lines.append((f"Energy: -{ec:.0f} / yr", C_WARN))
+
+        return lines

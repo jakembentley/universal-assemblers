@@ -20,6 +20,8 @@ from .pause_menu import PauseMenu
 from .entity_view import EntityView
 from .tech_view import TechView
 from .energy_view import EnergyView
+from .queue_view import QueueView
+from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
@@ -50,6 +52,8 @@ class App:
         self.entity_view    = EntityView(self)
         self.tech_view      = TechView(self)
         self.energy_view    = EnergyView(self)
+        self.queue_view     = QueueView(self)
+        self.tooltip        = Tooltip()
         self.new_game_panel = NewGamePanel(self)
 
         # Toast notifications: each entry is (message, expiry_ms, color)
@@ -115,6 +119,8 @@ class App:
         body_id: str | None = None,
     ) -> None:
         self.tech_view.deactivate()
+        self.energy_view.deactivate()
+        self.queue_view.deactivate()
         self.entity_view.activate(category, type_value, system_id, body_id)
 
     def close_entity_view(self) -> None:
@@ -123,6 +129,7 @@ class App:
     def open_tech_view(self) -> None:
         self.entity_view.deactivate()
         self.energy_view.deactivate()
+        self.queue_view.deactivate()
         self.tech_view.activate()
 
     def close_tech_view(self) -> None:
@@ -131,10 +138,20 @@ class App:
     def open_energy_view(self) -> None:
         self.entity_view.deactivate()
         self.tech_view.deactivate()
+        self.queue_view.deactivate()
         self.energy_view.activate()
 
     def close_energy_view(self) -> None:
         self.energy_view.deactivate()
+
+    def open_queue_view(self) -> None:
+        self.entity_view.deactivate()
+        self.tech_view.deactivate()
+        self.energy_view.deactivate()
+        self.queue_view.activate()
+
+    def close_queue_view(self) -> None:
+        self.queue_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -255,6 +272,7 @@ class App:
         self.entity_view = EntityView(self)
         self.tech_view   = TechView(self)
         self.energy_view = EnergyView(self)
+        self.queue_view  = QueueView(self)
         if self.galaxy_view:
             self.galaxy_view = GalaxyView(self)
         if self.game_view:
@@ -364,7 +382,9 @@ class App:
                     self.quit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.energy_view.is_active:
+                        if self.queue_view.is_active:
+                            self.close_queue_view()
+                        elif self.energy_view.is_active:
                             self.close_energy_view()
                         elif self.tech_view.is_active:
                             self.close_tech_view()
@@ -400,13 +420,15 @@ class App:
                 self.new_game_panel.handle_events(events)
                 self.new_game_panel.draw(self.screen)
             elif self.state == "galaxy" and self.galaxy_view:
-                if not self.pause_menu.is_active and not self.tech_view.is_active \
-                        and not self.energy_view.is_active:
+                overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
+                                   or self.energy_view.is_active or self.queue_view.is_active)
+                if not overlays_active:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
-                if not self.pause_menu.is_active and not self.tech_view.is_active \
-                        and not self.energy_view.is_active:
+                overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
+                                   or self.energy_view.is_active or self.queue_view.is_active)
+                if not overlays_active:
                     self.game_view.handle_events(events)
                 self.game_view.draw(self.screen)
 
@@ -427,5 +449,13 @@ class App:
             if self.energy_view.is_active:
                 self.energy_view.handle_events(events)
                 self.energy_view.draw(self.screen)
+
+            # Queue overlay
+            if self.queue_view.is_active:
+                self.queue_view.handle_events(events)
+                self.queue_view.draw(self.screen)
+
+            # Tooltip — drawn last so it appears above everything
+            self.tooltip.draw(self.screen)
 
             pygame.display.flip()

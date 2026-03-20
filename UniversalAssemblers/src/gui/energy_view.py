@@ -67,6 +67,9 @@ class EnergyView:
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
             self._close_btn.handle_event(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                self._close()
+                return
             if event.type == pygame.MOUSEWHEEL:
                 visible_h = self._rect.height - HEADER_H - _FILTER_BTN_H - 16
                 max_scroll = max(0, self._content_h - visible_h)

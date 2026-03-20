@@ -100,7 +100,21 @@ if git diff --cached --quiet; then
 fi
 
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M")
-git commit -m "auto: ${PROJECT} changes @ ${TIMESTAMP}"
+
+# Build an informative body: list changed src/ files and the diff stat summary
+CHANGED_SRC=$(git diff --cached --name-only | grep "^${PROJECT}/src/" | sed "s|${PROJECT}/src/||" | sort | tr '\n' ' ')
+STAT_SUMMARY=$(git diff --cached --stat | tail -1 | sed 's/^ *//')
+
+BODY=""
+[ -n "$CHANGED_SRC" ] && BODY="src: ${CHANGED_SRC}"$'\n'
+[ -n "$STAT_SUMMARY" ] && BODY="${BODY}${STAT_SUMMARY}"
+
+if [ -n "$BODY" ]; then
+  git commit -m "auto: ${PROJECT} @ ${TIMESTAMP}" -m "$BODY"
+else
+  git commit -m "auto: ${PROJECT} @ ${TIMESTAMP}"
+fi
+
 git push origin master
 
 echo "[hook] Changes pushed to GitHub."

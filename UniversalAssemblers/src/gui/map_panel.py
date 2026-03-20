@@ -74,6 +74,18 @@ class MapPanel:
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
+            if event.type == pygame.MOUSEMOTION:
+                if self.rect.collidepoint(event.pos):
+                    hit_id = self._find_hit(event.pos)
+                    if hit_id:
+                        lines = self._build_tooltip(hit_id)
+                        self.app.tooltip.set_hover(hit_id, lines, event.pos)
+                    else:
+                        self.app.tooltip.clear_hover()
+                else:
+                    self.app.tooltip.clear_hover()
+                continue
+
             if not self.rect.collidepoint(pygame.mouse.get_pos()):
                 if event.type not in (pygame.MOUSEBUTTONDOWN,):
                     continue
@@ -477,6 +489,120 @@ class MapPanel:
         right = (int(x + math.cos(heading - 2.3) * size),
                  int(y + math.sin(heading - 2.3) * size))
         pygame.draw.polygon(surface, color, [tip, left, right])
+
+    # ------------------------------------------------------------------
+    # Tooltip content builder
+
+    def _build_tooltip(self, body_id: str) -> list[tuple[str, tuple]]:
+        """Return (text, color) lines describing the hovered body/entity."""
+        system = self.app.selected_system
+        gs     = self.app.game_state
+        if not system:
+            return []
+
+        lines: list[tuple[str, tuple]] = []
+
+        # Orbital structure icon pseudo-target
+        if body_id.endswith("_orbital_struct"):
+            lines.append(("Orbital Structures", C_ACCENT))
+            if gs:
+                structs = [i for i in gs.entity_roster.at(system.id)
+                           if i.category == "structure"]
+                for inst in structs:
+                    name = inst.type_value.replace("_", " ").title()
+                    lines.append((f"  {inst.count}×  {name}", C_TEXT_DIM))
+            return lines
+
+        # Star
+        if system.star.id == body_id:
+            star = system.star
+            lines.append((star.name, C_ACCENT))
+            lines.append((star.star_type.value, C_TEXT_DIM))
+            lines.append((f"Mass: {star.mass:.2f} Sol", C_TEXT_DIM))
+            if star.resources.gas > 0:
+                lines.append((f"Gas: {star.resources.gas:,.0f}", C_TEXT_DIM))
+            if gs:
+                n = sum(i.count for i in gs.entity_roster.at(body_id))
+                if n:
+                    lines.append((f"Entities: {n}", C_ACCENT))
+            return lines
+
+        # Find the body in orbital_bodies or moons
+        body = None
+        for b in system.orbital_bodies:
+            if b.id == body_id:
+                body = b
+                break
+            for m in b.moons:
+                if m.id == body_id:
+                    body = m
+                    break
+            if body is not None:
+                break
+
+        if body is None:
+            return []
+
+        lines.append((body.name, C_ACCENT))
+
+        subtype  = getattr(body, "subtype", None)
+        btype    = body.body_type.value
+        type_str = (subtype or btype).replace("_", " ").title()
+        size     = getattr(body, "size", None)
+        if size is not None:
+            lines.append((f"{type_str}  •  Size {size:.1f}", C_TEXT_DIM))
+        else:
+            lines.append((type_str, C_TEXT_DIM))
+
+        # Orbital radius (not on moons)
+        if hasattr(body, "orbital_radius"):
+            lines.append((f"Orbit: {body.orbital_radius:.2f} AU", C_TEXT_DIM))
+
+        # Resources — only show non-zero values
+        res = getattr(body, "resources", None)
+        if res:
+            if res.minerals > 0:
+                lines.append((f"Minerals:  {res.minerals:,.0f}", (180, 200, 255)))
+            if res.rare_minerals > 0:
+                lines.append((f"Rare Min:  {res.rare_minerals:,.0f}", (200, 160, 255)))
+            if res.ice > 0:
+                lines.append((f"Ice:       {res.ice:,.0f}", (160, 220, 255)))
+            if res.gas > 0:
+                lines.append((f"Gas:       {res.gas:,.0f}", (200, 220, 160)))
+            if res.bios > 0:
+                lines.append((f"Bios:      {res.bios:,.0f}", (100, 220, 120)))
+            if res.energy_output > 0:
+                lines.append((f"Solar Flux:{res.energy_output:.1f}", (255, 220, 80)))
+
+        if not gs:
+            return lines
+
+        # Entity counts
+        ents    = gs.entity_roster.at(body_id)
+        structs = sum(i.count for i in ents if i.category == "structure")
+        bots    = sum(i.count for i in ents if i.category == "bot")
+        ships   = sum(i.count for i in ents if i.category == "ship")
+        if structs or bots or ships:
+            parts = []
+            if structs:
+                parts.append(f"{structs} struct")
+            if bots:
+                parts.append(f"{bots} bots")
+            if ships:
+                parts.append(f"{ships} ships")
+            lines.append((", ".join(parts), C_ACCENT))
+
+        # Bio population
+        bio_pop = gs.bio_state.get(body_id)
+        if bio_pop:
+            bio_label = bio_pop.bio_type.value.title()
+            lines.append((
+                f"Bio: {bio_label}  ×{bio_pop.population:,.0f}  "
+                f"(aggr {bio_pop.aggression:.2f})",
+                (100, 220, 120),
+            ))
+
+        return lines
 
     # ------------------------------------------------------------------
 
