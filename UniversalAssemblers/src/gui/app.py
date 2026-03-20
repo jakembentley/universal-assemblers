@@ -319,6 +319,24 @@ class App:
     # ------------------------------------------------------------------
     # Toast notifications
 
+    def _location_name(self, body_id: "str | None", system_id: "str | None") -> str:
+        """Resolve a body_id or system_id to a human-readable name."""
+        if body_id and self.galaxy:
+            for sys in self.galaxy.solar_systems:
+                for body in sys.orbital_bodies:
+                    if body.id == body_id:
+                        return body.name
+                    for moon in body.moons:
+                        if moon.id == body_id:
+                            return moon.name
+        if system_id and self.galaxy:
+            sys_obj = next(
+                (s for s in self.galaxy.solar_systems if s.id == system_id), None
+            )
+            if sys_obj:
+                return sys_obj.name
+        return body_id or system_id or "?"
+
     def _process_sim_events(self) -> None:
         if not self.game_state:
             return
@@ -370,19 +388,65 @@ class App:
                                     loc_name = moon.name
                 msg = f"⚡ {plant_type} offline — fuel depleted at {loc_name}"
                 col = (255, 160, 40)
-            elif etype == "bios_attack":
-                body_id = ev.get("body_id", "")
-                loc_name = body_id
-                if self.galaxy:
-                    for sys in self.galaxy.solar_systems:
-                        for body in sys.orbital_bodies:
-                            if body.id == body_id:
-                                loc_name = body.name
-                            for moon in body.moons:
-                                if moon.id == body_id:
-                                    loc_name = moon.name
-                msg = f"⚠ Uplifted Bios damaged Extractor at {loc_name}"
+            elif etype in ("bios_entity_damaged", "bios_entity_destroyed"):
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                ent = (ev.get("entity_type") or "entity").replace("_", " ").title()
+                verb = "destroyed" if etype == "bios_entity_destroyed" else "damaged"
+                msg = f"BIOS ATTACK: {ent} {verb} at {loc}"
+                col = (255, 60, 60)
+            elif etype == "bios_mutation":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                msg = f"BIOS MUTATED to Uplifted at {loc}"
+                col = (255, 120, 40)
+            elif etype in ("solar_flare_damaged", "solar_flare_destroyed"):
+                loc = self._location_name(None, ev.get("system_id"))
+                ent = (ev.get("entity_type") or "ship").replace("_", " ").title()
+                verb = "destroyed" if etype == "solar_flare_destroyed" else "damaged"
+                msg = f"SOLAR FLARE: {ent} {verb} in {loc}"
+                col = (255, 140, 0)
+            elif etype == "asteroid_impact":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                ent = (ev.get("entity_type") or "structure").replace("_", " ").title()
+                destroyed = ev.get("destroyed", False)
+                msg = f"ASTEROID IMPACT: {ent} {'destroyed' if destroyed else 'damaged'} at {loc}"
                 col = (255, 80, 80)
+            elif etype == "factory_malfunction":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                destroyed = ev.get("destroyed", False)
+                msg = f"FACTORY MALFUNCTION at {loc}" + (" — destroyed!" if destroyed else "")
+                col = (255, 160, 40)
+            elif etype == "power_surge":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                ent = (ev.get("entity_type") or "power plant").replace("_", " ").title()
+                destroyed = ev.get("destroyed", False)
+                msg = f"POWER SURGE: {ent} {'destroyed' if destroyed else 'damaged'} at {loc}"
+                col = (255, 160, 40)
+            elif etype == "vein_discovery":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                res = (ev.get("resource") or "minerals").replace("_", " ").title()
+                amt = ev.get("amount", 0)
+                msg = f"VEIN FOUND: +{amt} {res} at {loc}"
+                col = (80, 220, 120)
+            elif etype == "bio_population_boom":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                btype = (ev.get("bio_type") or "bio").title()
+                msg = f"BIO BOOM: {btype} population surge at {loc}"
+                col = (160, 100, 255)
+            elif etype == "bio_aggression_spike":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                new_agg = ev.get("new_aggression", 0.0)
+                msg = f"BIO AGGRESSION SPIKE at {loc}: {int(new_agg * 100)}%"
+                col = (255, 100, 40)
+            elif etype == "research_breakthrough":
+                from ..models.tech import TECH_TREE
+                tid  = ev.get("tech_id", "")
+                name = TECH_TREE[tid].name if tid in TECH_TREE else tid
+                if ev.get("tech_completed"):
+                    msg = f"BREAKTHROUGH: {name} completed!"
+                    col = (80, 220, 120)
+                else:
+                    msg = f"RESEARCH BREAKTHROUGH: {name} advanced"
+                    col = (100, 180, 255)
             elif etype == "victory":
                 vtype = ev.get("victory_type", "unknown")
                 self._victory_state = vtype

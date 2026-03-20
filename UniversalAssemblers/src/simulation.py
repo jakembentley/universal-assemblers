@@ -223,11 +223,14 @@ class SimulationEngine:
 
     def __init__(self, gs: "GameState") -> None:
         self.gs = gs
+        seed = gs.galaxy.seed ^ 0xDEADF00D if gs.galaxy else 0xDEADF00D
+        self.rng = random.Random(seed)
 
     def tick(self, dt_years: float) -> list:
         """Run one sim step. Returns event dicts for UI notification."""
         events: list = []
         events.extend(self._tick_bios(dt_years))
+        events.extend(self._tick_random_events(dt_years))
         events.extend(self._tick_power_plants(dt_years))
         events.extend(self._tick_research(dt_years))
         events.extend(self._tick_ships(dt_years))
@@ -248,10 +251,10 @@ class SimulationEngine:
     # ------------------------------------------------------------------
 
     def _tick_bios(self, dt_years: float) -> list:
-        """Bio population growth, spread, and extractor damage."""
+        """Bio population growth, spread, mutation, and general entity attacks."""
         events: list = []
         galaxy = self.gs.galaxy
-        rng = random.Random()
+        rng = self.rng
 
         # Build body-to-system map and system-body lists for spread
         body_to_system: dict[str, str] = {}
@@ -293,24 +296,252 @@ class SimulationEngine:
                             )
                             self.gs.bio_state.add(seed_pop)
 
-            # Extractor damage: uplifted bios with aggression > 0.5
-            if pop.bio_type == BioType.UPLIFTED and pop.aggression > 0.5:
-                damage_chance = pop.aggression * 0.08 * dt_years
-                if rng.random() < damage_chance:
-                    extractors = [
-                        i for i in self.gs.entity_roster.at(pop.body_id)
-                        if i.category == "structure" and i.type_value == "extractor"
-                        and i.count > 0
-                    ]
-                    if extractors:
-                        self.gs.entity_roster.remove("structure", "extractor", pop.body_id, 1)
+            # Mutation: primitive bios near heavy player construction can become uplifted
+            if pop.bio_type == BioType.PRIMITIVE:
+                structure_count = sum(
+                    i.count for i in self.gs.entity_roster.at(pop.body_id)
+                    if i.category == "structure"
+                )
+                if structure_count >= 3:
+                    mutation_chance = 0.002 * (structure_count / 3.0) * dt_years
+                    if rng.random() < mutation_chance:
+                        pop.bio_type = BioType.UPLIFTED
+                        pop.aggression = min(1.0, pop.aggression + rng.uniform(0.1, 0.3))
                         events.append({
-                            "type":      "bios_attack",
+                            "type":      "bios_mutation",
                             "body_id":   pop.body_id,
                             "system_id": body_to_system.get(pop.body_id, ""),
                         })
 
+            # Attacks: uplifted bios with aggression > 0.5 can damage any entity type
+            if pop.bio_type == BioType.UPLIFTED and pop.aggression > 0.5:
+                damage_chance = pop.aggression * 0.08 * dt_years
+                if rng.random() < damage_chance:
+                    all_entities = self.gs.entity_roster.at(pop.body_id)
+                    target = self._pick_bio_attack_target(all_entities, rng)
+                    if target:
+                        dmg = int(rng.randint(10, 30) * min(2.0, pop.population / 1000.0))
+                        dmg = max(10, dmg)
+                        destroyed = self.gs.apply_damage(
+                            pop.body_id, target.category, target.type_value, dmg
+                        )
+                        ev_type = "bios_entity_destroyed" if destroyed else "bios_entity_damaged"
+                        events.append({
+                            "type":        ev_type,
+                            "body_id":     pop.body_id,
+                            "system_id":   body_to_system.get(pop.body_id, ""),
+                            "entity_cat":  target.category,
+                            "entity_type": target.type_value,
+                            "damage":      dmg,
+                        })
+
         return events
+
+    def _pick_bio_attack_target(self, entities: list, rng: random.Random) -> "object | None":
+        """Pick the highest-priority attackable entity from a location's roster."""
+        for priority_cat, priority_type in [
+            ("structure", "extractor"),
+            ("structure", "factory"),
+            ("structure", "shipyard"),
+            ("structure", "research_array"),
+            ("structure", None),
+            ("bot",       None),
+            ("ship",      None),
+        ]:
+            candidates = [
+                i for i in entities
+                if i.category == priority_cat
+                and (priority_type is None or i.type_value == priority_type)
+                and i.count > 0
+            ]
+            if candidates:
+                return rng.choice(candidates)
+        return None
+
+    def _tick_random_events(self, dt_years: float) -> list:
+        """Roll random events across all player-occupied bodies and systems."""
+        events: list = []
+        galaxy = self.gs.galaxy
+        if not galaxy:
+            return events
+
+        body_map: dict[str, object] = {}
+        body_to_system: dict[str, str] = {}
+        for sys in galaxy.solar_systems:
+            for body in sys.orbital_bodies:
+                body_map[body.id] = body
+                body_to_system[body.id] = sys.id
+                for moon in body.moons:
+                    body_map[moon.id] = moon
+                    body_to_system[moon.id] = sys.id
+
+        # Collect occupied locations
+        occupied_body_ids: set[str] = set()
+        occupied_system_ids: set[str] = set()
+        for inst in self.gs.entity_roster.all():
+            if inst.category in ("structure", "bot"):
+                occupied_body_ids.add(inst.location_id)
+            elif inst.category == "ship":
+                occupied_system_ids.add(inst.location_id)
+
+        # System-level events (solar flares)
+        for sys_id in occupied_system_ids:
+            ev = self._roll_system_event(sys_id, body_to_system, dt_years)
+            if ev:
+                events.append(ev)
+
+        # Body-level events (one per body per tick max)
+        for body_id in occupied_body_ids:
+            body = body_map.get(body_id)
+            if not body:
+                continue
+            ev = self._roll_body_event(body_id, body, body_to_system, dt_years)
+            if ev:
+                events.append(ev)
+
+        return events
+
+    def _roll_system_event(
+        self, sys_id: str, body_to_system: dict, dt_years: float
+    ) -> "dict | None":
+        """Roll one system-level random event (solar flares, etc.)."""
+        rng = self.rng
+        roster = self.gs.entity_roster
+
+        ships_here = [i for i in roster.at(sys_id) if i.category == "ship" and i.count > 0]
+        if ships_here and rng.random() < 0.08 * dt_years:
+            target = rng.choice(ships_here)
+            dmg = rng.randint(20, 50)
+            destroyed = self.gs.apply_damage(sys_id, "ship", target.type_value, dmg)
+            ev_type = "solar_flare_destroyed" if destroyed else "solar_flare_damaged"
+            return {
+                "type":        ev_type,
+                "system_id":   sys_id,
+                "entity_cat":  "ship",
+                "entity_type": target.type_value,
+                "damage":      dmg,
+            }
+        return None
+
+    def _roll_body_event(
+        self, body_id: str, body: object, body_to_system: dict, dt_years: float
+    ) -> "dict | None":
+        """Roll one body-level random event. Returns first triggered event or None."""
+        rng = self.rng
+        gs = self.gs
+        roster = gs.entity_roster
+        sys_id = body_to_system.get(body_id, "")
+
+        entities_here = roster.at(body_id)
+        structures    = [i for i in entities_here if i.category == "structure" and i.count > 0]
+        factories     = [i for i in structures if i.type_value == "factory"]
+        power_plants  = [i for i in structures if i.type_value.startswith("power_plant")]
+        extractors    = [i for i in structures if i.type_value == "extractor"]
+        research      = [i for i in structures if i.type_value == "research_array"]
+        bio_pop       = gs.bio_state.get(body_id)
+        uplifted_bio  = bio_pop if (bio_pop and bio_pop.bio_type == BioType.UPLIFTED) else None
+
+        # Asteroid impact
+        if structures and rng.random() < 0.04 * dt_years:
+            target = rng.choice(structures)
+            destroyed = gs.apply_damage(body_id, "structure", target.type_value, 100)
+            return {
+                "type":        "asteroid_impact",
+                "body_id":     body_id,
+                "system_id":   sys_id,
+                "entity_type": target.type_value,
+                "destroyed":   destroyed,
+            }
+
+        # Factory malfunction
+        if factories and rng.random() < 0.06 * dt_years:
+            dmg = rng.randint(15, 40)
+            destroyed = gs.apply_damage(body_id, "structure", "factory", dmg)
+            return {
+                "type":      "factory_malfunction",
+                "body_id":   body_id,
+                "system_id": sys_id,
+                "damage":    dmg,
+                "destroyed": destroyed,
+            }
+
+        # Power surge
+        if power_plants and rng.random() < 0.05 * dt_years:
+            target = rng.choice(power_plants)
+            dmg = rng.randint(20, 50)
+            destroyed = gs.apply_damage(body_id, "structure", target.type_value, dmg)
+            return {
+                "type":        "power_surge",
+                "body_id":     body_id,
+                "system_id":   sys_id,
+                "entity_type": target.type_value,
+                "damage":      dmg,
+                "destroyed":   destroyed,
+            }
+
+        # Vein discovery (rare minerals)
+        if extractors and rng.random() < 0.02 * dt_years:
+            amount = rng.uniform(50, 200)
+            body.resources.rare_minerals += amount  # type: ignore[attr-defined]
+            return {
+                "type":      "vein_discovery",
+                "body_id":   body_id,
+                "system_id": sys_id,
+                "resource":  "rare_minerals",
+                "amount":    round(amount),
+            }
+
+        # Vein discovery (minerals)
+        if extractors and rng.random() < 0.04 * dt_years:
+            amount = rng.uniform(200, 800)
+            body.resources.minerals += amount  # type: ignore[attr-defined]
+            return {
+                "type":      "vein_discovery",
+                "body_id":   body_id,
+                "system_id": sys_id,
+                "resource":  "minerals",
+                "amount":    round(amount),
+            }
+
+        # Bio aggression spike
+        if uplifted_bio and rng.random() < 0.06 * dt_years:
+            uplifted_bio.aggression = min(1.0, uplifted_bio.aggression + rng.uniform(0.05, 0.25))
+            return {
+                "type":          "bio_aggression_spike",
+                "body_id":       body_id,
+                "system_id":     sys_id,
+                "new_aggression": round(uplifted_bio.aggression, 2),
+            }
+
+        # Bio population boom
+        if bio_pop and rng.random() < 0.07 * dt_years:
+            bio_pop.population = min(bio_pop.capacity, bio_pop.population * rng.uniform(1.2, 2.0))
+            return {
+                "type":           "bio_population_boom",
+                "body_id":        body_id,
+                "system_id":      sys_id,
+                "bio_type":       bio_pop.bio_type.value,
+                "new_population": int(bio_pop.population),
+            }
+
+        # Research breakthrough
+        if research and rng.random() < 0.03 * dt_years:
+            in_prog = gs.tech.in_progress_ids()
+            if in_prog:
+                tech_id   = rng.choice(in_prog)
+                bonus_pts = rng.uniform(1.0, 3.0) * len(research)
+                completed = gs.tech.add_progress(tech_id, bonus_pts)
+                ev: dict = {
+                    "type":      "research_breakthrough",
+                    "body_id":   body_id,
+                    "system_id": sys_id,
+                    "tech_id":   tech_id,
+                }
+                if completed:
+                    ev["tech_completed"] = True
+                return ev
+
+        return None
 
     def _tick_power_plants(self, dt_years: float) -> list:
         from .models.entity import POWER_PLANT_SPECS

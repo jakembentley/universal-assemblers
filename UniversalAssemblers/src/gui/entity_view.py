@@ -660,7 +660,18 @@ class EntityView:
         title_surf = font(13, bold=True).render(
             f"{name.upper()}  ×{count}", True, C_ACCENT
         )
-        surface.blit(title_surf, (self._rect.x + PADDING, self._rect.y + 6))
+        title_x = self._rect.x + PADDING
+        surface.blit(title_surf, (title_x, self._rect.y + 6))
+        # Damage indicator: show [XX% dmg] if entity is damaged
+        gs = self.app.game_state
+        loc = self._body_id or self._system_id
+        if gs and loc and self._category not in ("bio",):
+            hf = gs.health_fraction(loc, self._category, self._type_value)
+            if hf < 1.0:
+                dmg_pct = int((1.0 - hf) * 100)
+                dmg_col = (255, 80, 80) if hf <= 0.5 else (255, 160, 40)
+                dmg_surf = font(11).render(f"[{dmg_pct}% dmg]", True, dmg_col)
+                surface.blit(dmg_surf, (title_x + title_surf.get_width() + 8, self._rect.y + 8))
         self._close_btn.draw(surface)
 
         draw_separator(surface, self._rect.x + PADDING, self._rect.y + HEADER_H,

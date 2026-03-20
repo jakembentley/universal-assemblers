@@ -468,6 +468,8 @@ class GameState:
         self.power_plant_active: dict[str, bool] = {}
         # extractor_refine_mode: key = body_id, default False
         self.extractor_refine_mode: dict[str, bool] = {}
+        # entity_damage: key = f"{location_id}:{category}:{type_value}", value = accumulated dmg pts
+        self.entity_damage: dict[str, int] = {}
         self.factory_tasks:  FactoryTaskList  = FactoryTaskList()
         self.shipyard_tasks: ShipyardTaskList = ShipyardTaskList()
         # body_env cache: body_id → {orbital_radius, subtype, star_luminosity}
@@ -594,6 +596,43 @@ class GameState:
         return events
 
     # ------------------------------------------------------------------
+    # Entity damage
+
+    _HP_PER_ENTITY: int = 100  # damage points to destroy one unit of any entity type
+
+    def _damage_key(self, location_id: str, category: str, type_value: str) -> str:
+        return f"{location_id}:{category}:{type_value}"
+
+    def apply_damage(
+        self, location_id: str, category: str, type_value: str, amount: int
+    ) -> bool:
+        """Apply damage to an entity stack. Returns True if at least one unit was destroyed."""
+        key = self._damage_key(location_id, category, type_value)
+        self.entity_damage[key] = self.entity_damage.get(key, 0) + amount
+        destroyed = False
+        while self.entity_damage.get(key, 0) >= self._HP_PER_ENTITY:
+            removed = self.entity_roster.remove(category, type_value, location_id, 1)
+            if not removed:
+                self.entity_damage.pop(key, None)
+                break
+            self.entity_damage[key] -= self._HP_PER_ENTITY
+            destroyed = True
+            if self.entity_damage.get(key, 0) <= 0:
+                self.entity_damage.pop(key, None)
+                break
+        return destroyed
+
+    def health_fraction(
+        self, location_id: str, category: str, type_value: str
+    ) -> float:
+        """Return 0.0–1.0 health of the top unit in the stack (1.0 = undamaged)."""
+        key = self._damage_key(location_id, category, type_value)
+        dmg = self.entity_damage.get(key, 0)
+        if dmg == 0:
+            return 1.0
+        return max(0.0, 1.0 - (dmg % self._HP_PER_ENTITY) / self._HP_PER_ENTITY)
+
+    # ------------------------------------------------------------------
     # Adjacency
 
     @staticmethod
@@ -704,6 +743,7 @@ class GameState:
     # Serialisation
 
     def to_dict(self) -> dict:
+        from .simulation import BioPopulation as _BP  # noqa: F401
         return {
             "version": 2,
             "discovery_states":     {k: v.value for k, v in self._states.items()},
@@ -712,10 +752,23 @@ class GameState:
             "tech":                 self.tech.to_dict(),
             "power_plant_active":   dict(self.power_plant_active),
             "extractor_refine_mode": dict(self.extractor_refine_mode),
+            "entity_damage":        dict(self.entity_damage),
             "factory_tasks":        self.factory_tasks.to_dict(),
             "shipyard_tasks":       self.shipyard_tasks.to_dict(),
             "bot_tasks":            self.bot_tasks.to_dict(),
             "order_queue":          self.order_queue.to_dict(),
+            "bio_state": [
+                {
+                    "body_id":     p.body_id,
+                    "system_id":   p.system_id,
+                    "bio_type":    p.bio_type.value,
+                    "population":  p.population,
+                    "aggression":  p.aggression,
+                    "growth_rate": p.growth_rate,
+                    "capacity":    p.capacity,
+                }
+                for p in self.bio_state.all()
+            ],
         }
 
     @classmethod
@@ -732,13 +785,31 @@ class GameState:
         gs.tech                  = TechState.from_dict(d.get("tech", {}))
         gs.power_plant_active    = dict(d.get("power_plant_active", {}))
         gs.extractor_refine_mode = dict(d.get("extractor_refine_mode", {}))
+        gs.entity_damage         = dict(d.get("entity_damage", {}))
         gs.factory_tasks  = FactoryTaskList.from_dict(d.get("factory_tasks", {}))
         gs.shipyard_tasks = ShipyardTaskList.from_dict(d.get("shipyard_tasks", {}))
         gs.bot_tasks      = BotTaskList.from_dict(d.get("bot_tasks", {}))
         from .simulation import OrderQueue
         gs.order_queue = OrderQueue.from_dict(d.get("order_queue", {}))
 
-        gs._init_bio_state()
+        # Bio state: restore serialised populations if present, else regenerate from scratch
+        if "bio_state" in d:
+            from .simulation import BioState, BioPopulation
+            from .models.entity import BioType as _BioType
+            gs.bio_state = BioState()
+            for pd in d["bio_state"]:
+                pop = BioPopulation(
+                    body_id=pd["body_id"],
+                    system_id=pd["system_id"],
+                    bio_type=_BioType(pd["bio_type"]),
+                    population=pd["population"],
+                    aggression=pd["aggression"],
+                    growth_rate=pd["growth_rate"],
+                    capacity=pd.get("capacity", 0.0),
+                )
+                gs.bio_state.add(pop)
+        else:
+            gs._init_bio_state()
 
         from .simulation import SimulationEngine
         gs.sim_engine = SimulationEngine(gs)
