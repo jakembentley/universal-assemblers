@@ -1,6 +1,5 @@
 # TODO — Not Yet Implemented
 
-- add a ledger to the game that tracks player entity actions and simulated events visible to the player
 - Drop Ship pathfinding and impact conversion
 - Probe exploration gating (system bodies hidden until visited)
 - Bios entity simulation
@@ -12,3 +11,11 @@
 - Orbital structure square icon on system map
 - Megastructure special rendering (Dyson Sphere star/planet decay)
 - add a tooltip for player entity items
+- bug where starting entitys location is sys0000_loc000
+- implement an enforcer bot which defends player entities on planets
+- enable manual input of unit allocation in tasks
+- miners should not be able to harvest bios only harvesters
+- resize views when resolution is altered
+- add a 1440p resolution
+- enable players to zoom in and out of the system map with scroll wheel
+- enable players to exit from certain views by either clicking close, clicking another view or right clicking on the view
