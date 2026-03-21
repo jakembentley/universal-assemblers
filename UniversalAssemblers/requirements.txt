@@ -1,2 +1,2 @@
-pygame
-pyinstaller
+pygame>=2.5,<3.0
+pyinstaller>=6.0,<7.0

@@ -1,0 +1,45 @@
+{
+  "run": {
+    "seed": 42,
+    "systems": 10,
+    "ticks": 200,
+    "dt": 0.05,
+    "game_years": 10.0
+  },
+  "invariant_violations": [],
+  "events_summary": {
+    "by_type": {
+      "asteroid_impact": 2,
+      "solar_flare_damaged": 1
+    },
+    "total": 3
+  },
+  "notable_events": [],
+  "missing_mechanics": [
+    "no vein_discovery despite miners/mining_vessels present",
+    "no bios_mutation after 50+ ticks with bio populations present",
+    "no victory event after full run (may be expected if prerequisites unmet)"
+  ],
+  "final_state": {
+    "game_years": 10.0,
+    "entities": {
+      "structure": {
+        "extractor": 1,
+        "power_plant_solar": 1,
+        "power_plant_wind": 1
+      },
+      "bot": {
+        "miner": 1,
+        "constructor": 1
+      },
+      "ship": {
+        "probe": 1,
+        "drop_ship": 1,
+        "mining_vessel": 1
+      }
+    },
+    "tech_researched": [],
+    "systems_discovered": 14,
+    "bio_populations": 15
+  }
+}

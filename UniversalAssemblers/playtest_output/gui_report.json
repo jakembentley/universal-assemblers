@@ -1,0 +1,133 @@
+{
+  "mode": "headless (dummy driver)",
+  "checks": [
+    {
+      "name": "initial_state_is_menu",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "main_menu_exists",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "launch_game_reaches_galaxy",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "game_state_created",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "galaxy_has_systems",
+      "passed": true,
+      "detail": "count=8"
+    },
+    {
+      "name": "galaxy_view_renders",
+      "passed": true,
+      "detail": "skipped (headless)"
+    },
+    {
+      "name": "enter_home_system",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "game_view_created",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "system_view_renders",
+      "passed": true,
+      "detail": "skipped (headless)"
+    },
+    {
+      "name": "tech_overlay_opens",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "tech_overlay_mutual_exclusion",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "tech_overlay_renders",
+      "passed": true,
+      "detail": "skipped (headless)"
+    },
+    {
+      "name": "esc_closes_tech_overlay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "energy_overlay_opens",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "energy_overlay_mutual_exclusion",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "energy_overlay_renders",
+      "passed": true,
+      "detail": "skipped (headless)"
+    },
+    {
+      "name": "esc_closes_energy_overlay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "queue_overlay_opens",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "esc_closes_queue_overlay",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "energy_deactivates_tech",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "queue_deactivates_energy",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "all_overlays_closed",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "entity_view_factory_opens",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "entity_view_mutual_exclusion",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "esc_closes_entity_view",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "passed": 25,
+  "failed": 0,
+  "errors": []
+}

@@ -79,6 +79,8 @@ Use the Agent tool with subagent_type "test-updater". Tell it which files were c
 
 Do not spawn the agent for GUI-only changes (`src/gui/`) — GUI code is not testable headlessly.
 
+Before committing: run `~/anaconda3/python.exe -c "from src.gui.app import App"` to confirm imports resolve (catches build failures in ~1 s instead of after PyInstaller's 60–120 s run).
+
 The linter also runs automatically as a PostToolUse hook on every `src/` edit — check hook output for `[lint]` lines.
 
 ## Key design rules

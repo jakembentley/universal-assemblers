@@ -29,6 +29,14 @@ fi
 
 echo "[build] Source changes detected — running PyInstaller..."
 
+# ── 2.5. Validate imports before PyInstaller ─────────────────────────────────
+echo "[build] Validating imports..."
+if ! "$PYTHON" -c "from src.gui.app import App" 2>&1; then
+  echo "[build] IMPORT CHECK FAILED — fix Python errors before building."
+  exit 1
+fi
+echo "[build] Import check OK."
+
 # ── 3. Run PyInstaller ────────────────────────────────────────────────────────
 "$PYINSTALLER" "$SPEC" --noconfirm 2>&1
 BUILD_CODE=$?

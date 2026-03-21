@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/write_smoke_tests.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/check_python_path.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/Admin/code/UniversalAssemblers/scripts/run_smoke_tests.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
