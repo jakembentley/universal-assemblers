@@ -20,15 +20,16 @@ class GameView:
 
     # ------------------------------------------------------------------
 
-    def handle_events(self, events: list[pygame.event.Event]) -> None:
+    def handle_events(self, events: list[pygame.event.Event], overlays_active: bool = False) -> None:
         ev = self.app.entity_view
-        self.taskbar.handle_events(events)
-        self.nav_panel.handle_events(events)
-        if ev.is_active:
-            ev.handle_events(events)
-        else:
-            self.map_panel.handle_events(events)
-        self.entities_panel.handle_events(events)
+        self.taskbar.handle_events(events)  # always — taskbar must be reachable even when overlays are open
+        if not overlays_active:
+            self.nav_panel.handle_events(events)
+            if ev.is_active:
+                ev.handle_events(events)
+            else:
+                self.map_panel.handle_events(events)
+            self.entities_panel.handle_events(events)
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(C_BG)

@@ -624,11 +624,14 @@ class App:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
             elif self.state == "system" and self.game_view:
-                overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
-                                   or self.energy_view.is_active or self.queue_view.is_active
-                                   or self.ledger_view.is_active)
-                if not overlays_active:
-                    self.game_view.handle_events(events)
+                modal_overlays_active = (
+                    self.tech_view.is_active
+                    or self.energy_view.is_active
+                    or self.queue_view.is_active
+                    or self.ledger_view.is_active
+                )
+                if not self.pause_menu.is_active:
+                    self.game_view.handle_events(events, overlays_active=modal_overlays_active)
                 self.game_view.draw(self.screen)
 
             # Overlay clock + pause menu
