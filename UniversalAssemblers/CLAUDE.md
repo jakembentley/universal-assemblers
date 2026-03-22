@@ -50,7 +50,6 @@ Git log is the primary context recovery mechanism. Every session that implements
 
 Why: <one phrase or sentence>
 What: <2-3 tight bullets>
-Next: <what comes after>
 
 Files: <key files changed>
 ```

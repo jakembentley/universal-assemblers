@@ -869,6 +869,9 @@ class SimulationEngine:
                 effective_bots = bot_count * alloc_frac
 
                 if task.task_type == "mine":
+                    # Only harvesters can harvest bios; miners are blocked
+                    if task.resource == "bios" and bot_type != "harvester":
+                        continue
                     rate  = _MINE_RATES.get(bot_type, 5.0)
                     mined = rate * effective_bots * throttle * dt_years
                     if body:

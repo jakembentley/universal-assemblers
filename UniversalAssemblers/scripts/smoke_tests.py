@@ -21,6 +21,7 @@ import src.gui.entity_view
 import src.gui.galaxy_view
 import src.gui.game_clock
 import src.gui.game_view
+import src.gui.ledger_view
 import src.gui.main_menu
 import src.gui.map_panel
 import src.gui.nav_panel
@@ -33,6 +34,7 @@ import src.gui.tooltip
 import src.gui.widgets
 import src.models.celestial
 import src.models.entity
+import src.models.ledger
 import src.models.resource
 import src.models.tech
 import src.simulation
