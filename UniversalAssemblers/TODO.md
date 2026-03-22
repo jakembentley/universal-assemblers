@@ -16,6 +16,6 @@
 - enable manual input of unit allocation in tasks
 - miners should not be able to harvest bios only harvesters
 - resize views when resolution is altered
-- add a 1440p resolution
 - enable players to zoom in and out of the system map with scroll wheel
 - enable players to exit from certain views by either clicking close, clicking another view or right clicking on the view
+- starting planet must have ice as a resource. 
