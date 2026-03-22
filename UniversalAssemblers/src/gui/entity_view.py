@@ -737,7 +737,8 @@ class EntityView:
 
         gs = self.app.game_state
         loc = self._body_id or self._system_id
-        txt("Location", loc or "—", C_TEXT_DIM)
+        loc_name = self.app._location_name(self._body_id, self._system_id) if self.app else (loc or "—")
+        txt("Location", loc_name, C_TEXT_DIM)
 
         # Power plant details
         try:
