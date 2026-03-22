@@ -354,6 +354,21 @@ class MapGenerator:
         orbital_bodies: List[CelestialBody] = []
         body_seq = 0
 
+        # For home system: guarantee a terrestrial planet in the habitable zone first
+        if sys_index == 0:
+            home_radius = round(self.rng.uniform(0.8, 1.5), 4)
+            home_planet = self._generate_planet(
+                sys_id, name, body_seq, home_radius,
+                forced_subtype=PlanetSubtype.TERRESTRIAL,
+            )
+            # Guarantee ice resource (terrestrial planets < 3 AU normally have none)
+            if home_planet.resources.ice == 0:
+                home_planet.resources.ice = round(
+                    self.rng.uniform(50, 300) * self._res_mult, 2
+                )
+            orbital_bodies.append(home_planet)
+            body_seq += 1
+
         # Planets — placed at increasing orbital radii from the star
         planet_radii = sorted(
             self.rng.uniform(0.15, 35.0) for _ in range(counts["planets"])
@@ -457,9 +472,10 @@ class MapGenerator:
     # ------------------------------------------------------------------
 
     def _generate_planet(
-        self, sys_id: str, system_name: str, seq: int, orbital_radius: float
+        self, sys_id: str, system_name: str, seq: int, orbital_radius: float,
+        forced_subtype: Optional[PlanetSubtype] = None,
     ) -> CelestialBody:
-        subtype = self._pick_planet_subtype(orbital_radius)
+        subtype = forced_subtype if forced_subtype is not None else self._pick_planet_subtype(orbital_radius)
         name = self._planet_name(system_name)
         body_id = f"{sys_id}_body_{seq:03d}"
 
