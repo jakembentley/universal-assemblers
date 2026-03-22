@@ -14,7 +14,6 @@ This commit is the primary source of context for future Claude sessions and suba
 
 Why: <one phrase or sentence>
 What: <2-3 tight bullets — one key fact each>
-Next: <what comes after>
 
 Files: <key files, comma-separated>
 ```
@@ -39,7 +38,6 @@ What:
   - QueueView: filterable overlay for bot/factory/shipyard queues
   - Tooltip: 420ms hover delay; hover-ID change resets timer
   - ESC priority: queue_view > energy_view > tech_view > entity_view
-Next: orbital structure icon on map.
 
 Files: src/gui/queue_view.py, src/gui/tooltip.py, src/gui/app.py, src/gui/taskbar.py
 ```

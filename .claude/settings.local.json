@@ -1,13 +1,11 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(chmod +x:*)",
       "Bash(bash:*)",
       "Bash(git pull:*)",
       "Bash(/c/Users/Admin/anaconda3/python.exe scripts/smoke_tests.py 2>&1)",
       "Bash(ls:*)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k,'''':'''',json.dumps\\(v,indent=2\\)\\) for k,v in d.items\\(\\)]\")",
       "Read(//c/Users/Admin/.claude/**)",
       "Bash(/c/Users/Admin/anaconda3/Scripts/pyinstaller.exe UniversalAssemblers.spec --noconfirm 2>&1)",
       "Bash(grep:*)",
@@ -17,12 +15,6 @@
       "Bash(cd:*)",
       "Bash(/c/Users/Admin/anaconda3/python.exe -c \"\nfrom src.gui.app import App\nfrom src.simulation import SimulationEngine\nfrom src.game_state import GameState\nfrom src.generator import MapGenerator\nfrom src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS\nfrom src.models.tech import TECH_TREE\nprint\\('All imports OK'\\)\n\" 2>&1)",
       "Bash(cmd.exe /c build.bat 2>&1)",
-      "Bash(cmd.exe /c \"echo Testing USERPROFILE: %USERPROFILE% && %USERPROFILE%\\\\anaconda3\\\\python.exe --version && %USERPROFILE%\\\\anaconda3\\\\Scripts\\\\pyinstaller.exe --version\" 2>&1)",
-      "Bash(cmd.exe /c \"echo Testing USERPROFILE: %USERPROFILE%\" 2>&1 || echo \"cmd failed\")",
-      "Bash(cmd.exe /c \"build.bat > C:\\\\Windows\\\\Temp\\\\build_output.txt 2>&1\")",
-      "Read(//c/Windows/Temp/**)",
-      "Bash(powershell.exe -Command \"cd 'C:\\\\Users\\\\Admin\\\\code\\\\UniversalAssemblers'; & .\\\\build.bat 2>&1\" 2>&1)",
-      "Bash(powershell.exe -Command \"\ncd 'C:\\\\Users\\\\Admin\\\\code\\\\UniversalAssemblers'\n\\\\$p = [System.Environment]::GetEnvironmentVariable\\('USERPROFILE'\\)\n& \\\\\"\\\\$p\\\\anaconda3\\\\Scripts\\\\pyinstaller.exe\\\\\" UniversalAssemblers.spec --noconfirm 2>&1 | Out-Null\nWrite-Host \\\\\"PyInstaller exit: \\\\$LASTEXITCODE\\\\\"\n\" 2>&1)",
       "Bash(timeout:*)",
       "Bash(/c/Users/Admin/anaconda3/python.exe -c \"\nfrom src.gui.app import App\nfrom src.simulation import SimulationEngine\nfrom src.game_state import GameState\nfrom src.generator import MapGenerator\nfrom src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS\nfrom src.models.tech import TECH_TREE\nfrom src.gui.energy_view import EnergyView\nprint\\('All imports OK'\\)\n\" 2>&1)",
       "Bash(/c/Users/Admin/anaconda3/Scripts/pyinstaller.exe UniversalAssemblers.spec --noconfirm --clean 2>&1 | grep -E \"\\(ERROR|WARNING|FAILED|error|failed|ModuleNotFound\\)\" | head -20)",
@@ -35,23 +27,11 @@
       "Bash(git stash:*)",
       "Bash(git commit:*)",
       "Bash(/c/Users/Admin/anaconda3/python.exe -m py_compile src/simulation.py src/models/entity.py src/game_state.py)",
-      "Bash(echo \"EXIT:$?\")",
-      "Bash(echo \"Exit: $?\")",
       "Bash(wc -l /c/Users/Admin/code/UniversalAssemblers/src/**/*.py)",
-      "Bash(git -C /c/Users/Admin/code/UniversalAssemblers add UniversalAssemblers/CLAUDE.md UniversalAssemblers/build.bat UniversalAssemblers/requirements.txt UniversalAssemblers/scripts/run_build.sh UniversalAssemblers/.claude/settings.local.json UniversalAssemblers/docs/ARCHITECTURE.md UniversalAssemblers/docs/GAME_DESIGN.md UniversalAssemblers/docs/SETUP.md UniversalAssemblers/playtest_output/gui_report.json UniversalAssemblers/playtest_output/sim_report.json)",
-      "Bash(git -C /c/Users/Admin/code/UniversalAssemblers status)",
       "Bash(git worktree:*)",
-      "Bash(find /c/Users/Admin/code -name *commit* -type f)",
-      "Bash(find /c/Users/Admin/.claude -type f -name *.md -o -name *.txt)",
       "Bash(claude:*)",
-      "Bash(find /c/Users/Admin/.claude -name *.md -path */skills/*)",
-      "Bash(find /c/Users/Admin/.claude -name *.md -path */commands/*)",
-      "Bash(find /c/Users/Admin/.claude -maxdepth 3 -name *.md)",
-      "Bash(for skill:*)",
-      "Bash(do)",
-      "Bash(mkdir -p /c/Users/Admin/code/.claude/skills/$skill)",
-      "Bash(cp /c/Users/Admin/code/UniversalAssemblers/.claude/skills/$skill/SKILL.md /c/Users/Admin/code/.claude/skills/$skill/SKILL.md)",
-      "Bash(done)"
-    ]
+      "Bash(git:*)"
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }
