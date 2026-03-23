@@ -13,13 +13,11 @@
       "Bash(git add:*)",
       "Bash(git push:*)",
       "Bash(cd:*)",
-      "Bash(/c/Users/Admin/anaconda3/python.exe -c \"\nfrom src.gui.app import App\nfrom src.simulation import SimulationEngine\nfrom src.game_state import GameState\nfrom src.generator import MapGenerator\nfrom src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS\nfrom src.models.tech import TECH_TREE\nprint\\('All imports OK'\\)\n\" 2>&1)",
+      "Bash(/c/Users/Admin/anaconda3/python.exe -c \"\nfrom src.gui.app import App\nfrom src.simulation import SimulationEngine\nfrom src.game_state import GameState\nfrom src.generator import MapGenerator\nfrom src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS\nfrom src.models.tech import TECH_TREE\nfrom src.gui.energy_view import EnergyView\nprint\\('All imports OK'\\)\n\" 2>&1)",
       "Bash(cmd.exe /c build.bat 2>&1)",
       "Bash(timeout:*)",
-      "Bash(/c/Users/Admin/anaconda3/python.exe -c \"\nfrom src.gui.app import App\nfrom src.simulation import SimulationEngine\nfrom src.game_state import GameState\nfrom src.generator import MapGenerator\nfrom src.models.entity import POWER_PLANT_SPECS, BUILD_COSTS\nfrom src.models.tech import TECH_TREE\nfrom src.gui.energy_view import EnergyView\nprint\\('All imports OK'\\)\n\" 2>&1)",
       "Bash(/c/Users/Admin/anaconda3/Scripts/pyinstaller.exe UniversalAssemblers.spec --noconfirm --clean 2>&1 | grep -E \"\\(ERROR|WARNING|FAILED|error|failed|ModuleNotFound\\)\" | head -20)",
       "Bash(rm:*)",
-      "Skill(update-config)",
       "Bash(/c/Users/Admin/anaconda3/python.exe scripts/smoke_tests.py)",
       "Bash(/c/Users/Admin/anaconda3/python.exe scripts/unit_tests.py)",
       "Bash(/c/Users/Admin/anaconda3/python.exe -m ruff check src/ --config ruff.toml)",
@@ -30,8 +28,8 @@
       "Bash(wc -l /c/Users/Admin/code/UniversalAssemblers/src/**/*.py)",
       "Bash(git worktree:*)",
       "Bash(claude:*)",
-      "Bash(git:*)"
-    ],
-    "defaultMode": "bypassPermissions"
+      "Bash(git:*)",
+      "Bash(/c/Users/Admin/anaconda3/python.exe -c \"from src.gui.app import App; print\\(''OK''\\)\")"
+    ]
   }
 }

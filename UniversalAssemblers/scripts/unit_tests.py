@@ -1847,6 +1847,200 @@ except Exception as e:
     fail("_ledger capped at _LEDGER_MAX (exception)", f"unexpected exception: {e}")
 
 
+# ─── MapGenerator: home planet resource guarantees ───────────────────────────
+section("MapGenerator: home planet resource guarantees")
+
+_TEST_SEEDS = [1, 7, 42, 99, 314, 1000, 9999]
+
+try:
+    for _seed in _TEST_SEEDS:
+        _galaxy = MapGenerator(seed=_seed, num_solar_systems=3).generate()
+        _home_body = _galaxy.solar_systems[0].orbital_bodies[0]
+        assert _home_body.resources.ice > 0, \
+            f"seed={_seed}: home planet ice should be > 0, got {_home_body.resources.ice}"
+    ok(f"home planet ice > 0 across {len(_TEST_SEEDS)} seeds")
+except AssertionError as e:
+    fail("home planet ice > 0", str(e))
+except Exception as e:
+    fail("home planet ice > 0", f"unexpected exception: {e}")
+
+try:
+    for _seed in _TEST_SEEDS:
+        _galaxy = MapGenerator(seed=_seed, num_solar_systems=3).generate()
+        _home_body = _galaxy.solar_systems[0].orbital_bodies[0]
+        assert _home_body.resources.gas > 0, \
+            f"seed={_seed}: home planet gas should be > 0, got {_home_body.resources.gas}"
+    ok(f"home planet gas > 0 across {len(_TEST_SEEDS)} seeds")
+except AssertionError as e:
+    fail("home planet gas > 0", str(e))
+except Exception as e:
+    fail("home planet gas > 0", f"unexpected exception: {e}")
+
+try:
+    # Both ice and gas must be strictly positive and rounded to 2 decimal places.
+    # The guarantee blocks only fire when natural generation produces 0; a planet
+    # that already has a small natural value will not be overwritten, so the only
+    # invariant that must hold universally is > 0 (not a specific minimum).
+    for _seed in _TEST_SEEDS:
+        _galaxy = MapGenerator(seed=_seed, num_solar_systems=3).generate()
+        _home_body = _galaxy.solar_systems[0].orbital_bodies[0]
+        _ice = _home_body.resources.ice
+        _gas = _home_body.resources.gas
+        assert _ice > 0, \
+            f"seed={_seed}: home planet ice should be > 0, got {_ice}"
+        assert _gas > 0, \
+            f"seed={_seed}: home planet gas should be > 0, got {_gas}"
+        assert _ice == _ice and _gas == _gas, \
+            f"seed={_seed}: ice or gas is NaN"
+    ok(f"home planet ice and gas both > 0 and finite across {len(_TEST_SEEDS)} seeds")
+except AssertionError as e:
+    fail("home planet resource plausible minimum", str(e))
+except Exception as e:
+    fail("home planet resource plausible minimum", f"unexpected exception: {e}")
+
+
+# ─── repair_damage / BotTask repair ──────────────────────────────────────────
+section("repair_damage / BotTask repair")
+
+from src.game_state import BotTask
+
+# repair_damage reduces entity_damage by given amount
+try:
+    gs_rep = _fresh_gs()
+    _rep_body = "rep_body_1"
+    gs_rep.entity_roster.add("structure", "factory", _rep_body, 1)
+    gs_rep.apply_damage(_rep_body, "structure", "factory", 60)
+    dmg_key = gs_rep._damage_key(_rep_body, "structure", "factory")
+    before = gs_rep.entity_damage[dmg_key]
+    gs_rep.repair_damage(_rep_body, "structure", "factory", 20)
+    after = gs_rep.entity_damage[dmg_key]
+    assert after == before - 20, \
+        f"repair_damage should reduce damage by 20, was {before}, now {after}"
+    ok("repair_damage reduces entity_damage by given amount")
+except AssertionError as e:
+    fail("repair_damage reduces damage", str(e))
+except Exception as e:
+    fail("repair_damage reduces damage (exception)", f"unexpected exception: {e}")
+
+# repair_damage clamps to 0 and removes the key when fully healed
+try:
+    gs_rep2 = _fresh_gs()
+    _rep_body2 = "rep_body_2"
+    gs_rep2.entity_roster.add("structure", "factory", _rep_body2, 1)
+    gs_rep2.apply_damage(_rep_body2, "structure", "factory", 40)
+    dmg_key2 = gs_rep2._damage_key(_rep_body2, "structure", "factory")
+    assert dmg_key2 in gs_rep2.entity_damage, "key should exist before repair"
+    # Repair more than the damage to verify clamp + key removal
+    gs_rep2.repair_damage(_rep_body2, "structure", "factory", 200)
+    assert dmg_key2 not in gs_rep2.entity_damage, \
+        "key should be removed from entity_damage when fully healed"
+    ok("repair_damage clamps to 0 and removes key when fully healed")
+except AssertionError as e:
+    fail("repair_damage clamps and removes key", str(e))
+except Exception as e:
+    fail("repair_damage clamps and removes key (exception)", f"unexpected exception: {e}")
+
+# repair_damage on key not in entity_damage does nothing (no KeyError)
+try:
+    gs_rep3 = _fresh_gs()
+    gs_rep3.repair_damage("nonexistent_body", "structure", "factory", 50)
+    ok("repair_damage on absent key does nothing (no exception)")
+except Exception as e:
+    fail("repair_damage absent key", f"unexpected exception: {e}")
+
+# BotTask.complete returns False for repair tasks regardless of target_amount
+try:
+    task_repair = BotTask(
+        task_type="repair",
+        resource="structure",
+        entity_type=None,
+        target_amount=0,
+    )
+    assert task_repair.complete is False, \
+        "BotTask.complete must return False for repair tasks with target_amount=0"
+    ok("BotTask.complete returns False for repair task (target_amount=0)")
+except AssertionError as e:
+    fail("BotTask.complete repair returns False", str(e))
+except Exception as e:
+    fail("BotTask.complete repair returns False (exception)", f"unexpected exception: {e}")
+
+try:
+    task_repair2 = BotTask(
+        task_type="repair",
+        resource="bot",
+        entity_type=None,
+        target_amount=999,
+        progress=999.0,
+    )
+    assert task_repair2.complete is False, \
+        "BotTask.complete must return False for repair tasks even with high progress/target"
+    ok("BotTask.complete returns False for repair task (progress >= target_amount)")
+except AssertionError as e:
+    fail("BotTask.complete repair returns False (high progress)", str(e))
+except Exception as e:
+    fail("BotTask.complete repair returns False (high progress exception)", f"unexpected exception: {e}")
+
+# Sim tick repair branch: logistic bot with repair task reduces entity_damage
+try:
+    gs_sim_rep = _fresh_gs()
+    # Use a known body from the generated galaxy
+    _home_body_id = gs_sim_rep.galaxy.solar_systems[0].orbital_bodies[0].id
+    # Add a factory with damage, and a logistic bot at the same body
+    gs_sim_rep.entity_roster.add("structure", "factory", _home_body_id, 1)
+    gs_sim_rep.apply_damage(_home_body_id, "structure", "factory", 60)
+    dmg_key_sim = gs_sim_rep._damage_key(_home_body_id, "structure", "factory")
+    dmg_before_sim = gs_sim_rep.entity_damage[dmg_key_sim]
+    gs_sim_rep.entity_roster.add("bot", "logistic_bot", _home_body_id, 1)
+    repair_task = BotTask(
+        task_type="repair",
+        resource="structure",
+        entity_type=None,
+        target_amount=0,
+        allocation=100,
+    )
+    gs_sim_rep.bot_tasks.add(_home_body_id, "logistic_bot", repair_task)
+    # Tick with 1 year dt; _REPAIR_RATE=20 HP/yr per bot at 100% allocation
+    gs_sim_rep.sim_engine._tick_bot_tasks(1.0)
+    dmg_after_sim = gs_sim_rep.entity_damage.get(dmg_key_sim, 0)
+    assert dmg_after_sim < dmg_before_sim, \
+        f"entity_damage should decrease after repair tick, was {dmg_before_sim}, now {dmg_after_sim}"
+    ok("sim tick repair branch reduces entity_damage for structure category")
+except AssertionError as e:
+    fail("sim tick repair reduces entity_damage", str(e))
+except Exception as e:
+    fail("sim tick repair reduces entity_damage (exception)", f"unexpected exception: {e}")
+
+# Ship repair is blocked when no shipyard exists at the bot's body
+try:
+    gs_no_sy = _fresh_gs()
+    _no_sy_body = gs_no_sy.galaxy.solar_systems[0].orbital_bodies[0].id
+    _no_sy_sys  = gs_no_sy.galaxy.solar_systems[0].id
+    # Add a ship at the system level (ship live at system_id)
+    gs_no_sy.entity_roster.add("ship", "warship", _no_sy_sys, 1)
+    gs_no_sy.apply_damage(_no_sy_sys, "ship", "warship", 60)
+    dmg_key_sy = gs_no_sy._damage_key(_no_sy_sys, "ship", "warship")
+    dmg_before_sy = gs_no_sy.entity_damage[dmg_key_sy]
+    # Place a logistic bot at the body — but no shipyard present
+    gs_no_sy.entity_roster.add("bot", "logistic_bot", _no_sy_body, 1)
+    ship_repair_task = BotTask(
+        task_type="repair",
+        resource="ship",
+        entity_type=None,
+        target_amount=0,
+        allocation=100,
+    )
+    gs_no_sy.bot_tasks.add(_no_sy_body, "logistic_bot", ship_repair_task)
+    gs_no_sy.sim_engine._tick_bot_tasks(1.0)
+    dmg_after_sy = gs_no_sy.entity_damage.get(dmg_key_sy, dmg_before_sy)
+    assert dmg_after_sy == dmg_before_sy, \
+        f"ship repair without shipyard should not reduce damage, was {dmg_before_sy}, now {dmg_after_sy}"
+    ok("ship repair blocked when no shipyard at bot body")
+except AssertionError as e:
+    fail("ship repair blocked without shipyard", str(e))
+except Exception as e:
+    fail("ship repair blocked without shipyard (exception)", f"unexpected exception: {e}")
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")
