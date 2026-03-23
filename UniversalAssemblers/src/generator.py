@@ -366,6 +366,11 @@ class MapGenerator:
                 home_planet.resources.ice = round(
                     self.rng.uniform(50, 300) * self._res_mult, 2
                 )
+            # Guarantee gas resource (needed for fuel cell production alongside ice)
+            if home_planet.resources.gas == 0:
+                home_planet.resources.gas = round(
+                    self.rng.uniform(50, 300) * self._res_mult, 2
+                )
             orbital_bodies.append(home_planet)
             body_seq += 1
 
