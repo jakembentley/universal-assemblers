@@ -38,6 +38,8 @@ class BotTask:
 
     @property
     def complete(self) -> bool:
+        if self.task_type == "repair":
+            return False
         if self.task_type == "mine":
             return self.progress >= self.target_amount
         if self.task_type == "transport":
@@ -659,6 +661,13 @@ class GameState:
                 self.entity_damage.pop(key, None)
                 break
         return destroyed
+
+    def repair_damage(self, location_id: str, category: str, type_value: str, amount: int) -> None:
+        key = self._damage_key(location_id, category, type_value)
+        if key in self.entity_damage:
+            self.entity_damage[key] = max(0, self.entity_damage[key] - amount)
+            if self.entity_damage[key] == 0:
+                del self.entity_damage[key]
 
     def health_fraction(
         self, location_id: str, category: str, type_value: str

@@ -218,6 +218,8 @@ _BUILD_RATES: dict[str, float] = {
     "constructor": 1.0,  # entities / yr / bot at 100% allocation
 }
 
+_REPAIR_RATE = 20  # HP restored per logistic bot per year at 100% allocation
+
 # Ship type_values that constructors can build
 _SHIP_TYPES: frozenset[str] = frozenset({
     "probe", "drop_ship", "mining_vessel", "transport", "warship",
@@ -902,6 +904,36 @@ class SimulationEngine:
                         setattr(res_src, resource, available - actual)
                         setattr(res_dst, resource, getattr(res_dst, resource, 0.0) + actual)
                         task.progress += actual
+
+                elif task.task_type == "repair":
+                    repair_amount = int(_REPAIR_RATE * effective_bots * throttle * dt_years)
+                    target_cat = task.resource  # "structure" | "bot" | "ship"
+
+                    if target_cat == "ship":
+                        # Ships live at system_id; bot must be at a body with a shipyard
+                        has_shipyard = any(
+                            i.type_value == "shipyard" and i.category == "structure"
+                            for i in gs.entity_roster.at(loc_id)
+                        )
+                        if not has_shipyard:
+                            continue
+                        heal_loc = body_to_system.get(loc_id)
+                    else:
+                        heal_loc = loc_id
+
+                    if heal_loc and repair_amount > 0:
+                        # Find most-damaged entity of the target category at heal_loc
+                        best_key = None
+                        best_dmg = 0
+                        for key, dmg in gs.entity_damage.items():
+                            parts = key.split(":")
+                            if len(parts) == 3 and parts[0] == heal_loc and parts[1] == target_cat and dmg > best_dmg:
+                                best_key = parts
+                                best_dmg = dmg
+                        if best_key:
+                            gs.repair_damage(best_key[0], best_key[1], best_key[2], repair_amount)
+                            if repair_amount >= 10:
+                                events.append({"type": "entity_repaired", "location": loc_id, "category": target_cat})
 
                 elif task.task_type == "build":
                     rate           = _BUILD_RATES.get(bot_type, 0.25)

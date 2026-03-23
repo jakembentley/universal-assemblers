@@ -71,6 +71,7 @@ _TASK_TYPE_LABELS: dict[str, str] = {
     "mine":      "Mine",
     "build":     "Build",
     "transport": "Transport",
+    "repair":    "Repair",
 }
 
 _MINE_RESOURCES = ["minerals", "rare_minerals", "ice", "gas", "bios"]
@@ -87,7 +88,7 @@ _BOT_ALLOWED_TASKS: dict[str, list[str]] = {
     "miner":        ["mine"],
     "harvester":    ["mine"],
     "constructor":  ["build"],
-    "logistic_bot": ["transport"],
+    "logistic_bot": ["transport", "repair"],
 }
 
 # Buildable entity types for constructor tasks (no tech requirement)
@@ -509,6 +510,8 @@ class EntityView:
             allowed = _BOT_ALLOWED_TASKS.get(self._type_value, ["mine"])
             if str(data) in allowed:
                 self._add_task_type = str(data)
+                if str(data) == "repair":
+                    self._add_task_res = "structure"
 
         elif action == "set_res":
             self._add_task_res = str(data)
@@ -542,6 +545,13 @@ class EntityView:
                     entity_type=None,
                     target_amount=self._add_task_amount,
                     target_location=self._transport_target_body,
+                )
+            elif self._add_task_type == "repair":
+                task = BotTask(
+                    task_type="repair",
+                    resource=self._add_task_res or "structure",
+                    entity_type=None,
+                    target_amount=0,
                 )
             else:
                 task = BotTask(
@@ -1166,6 +1176,11 @@ class EntityView:
                     desc = f"TRANSPORT  {task.resource or '?'} → {dest_name}"
                     progress_frac = min(1.0, task.progress / max(1, task.target_amount))
                     prog_str = f"{task.progress:,.0f} / {task.target_amount:,.0f}"
+                elif task.task_type == "repair":
+                    target_cat = task.resource or "structure"
+                    desc = f"REPAIR  {target_cat.upper()}"
+                    progress_frac = 0.0
+                    prog_str = "continuous"
                 else:
                     desc = f"BUILD  {(task.entity_type or '?').replace('_', ' ').title()}"
                     progress_frac = min(1.0, task.built_count / max(1, task.target_amount))
@@ -1241,7 +1256,10 @@ class EntityView:
         form_h = 8
         if len(allowed_types) > 1:
             form_h += 30   # task type toggle row
-        form_h += 60       # resource / entity grid (2 rows max)
+        if self._add_task_type == "repair":
+            form_h += 94   # category toggle (60px) + confirm button (34px)
+        else:
+            form_h += 60       # resource / entity grid (2 rows max)
         if self._add_task_type == "transport":
             # destination body selector: label + up to 4 rows of 2 bodies each
             form_h += 22   # label
@@ -1268,7 +1286,7 @@ class EntityView:
 
         # Task type toggle — only shown if the bot can do more than one type
         if len(allowed_types) > 1:
-            all_types = [("mine", "Mine"), ("build", "Build"), ("transport", "Transport")]
+            all_types = [("mine", "Mine"), ("build", "Build"), ("transport", "Transport"), ("repair", "Repair")]
             for i, (ttype, tlabel) in enumerate(
                 t for t in all_types if t[0] in allowed_types
             ):
@@ -1279,6 +1297,28 @@ class EntityView:
                 surface.blit(lbl, lbl.get_rect(center=tr.center))
                 self._hit_rects.append((tr, "set_task_type", ttype))
             fy += 30
+
+        # Repair category selector (special case — no amount row)
+        if self._add_task_type == "repair":
+            repair_cats = [("structure", "Structure"), ("bot", "Bot"), ("ship", "Ship")]
+            for i, (cat, cat_label) in enumerate(repair_cats):
+                cr = pygame.Rect(fx + i * 90, fy, 82, 22)
+                sel = self._add_task_res == cat
+                pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, cr, border_radius=3)
+                clbl = font(11, bold=True).render(cat_label, True, (0, 0, 0) if sel else C_BTN_TXT)
+                surface.blit(clbl, clbl.get_rect(center=cr.center))
+                self._hit_rects.append((cr, "set_res", cat))
+            fy += 28
+            note_s = font(10).render("Requires shipyard at location (ship repair)", True, (120, 120, 140))
+            surface.blit(note_s, (fx, fy))
+            fy += 18
+            # Confirm button
+            conf_r = pygame.Rect(fx, fy, 100, 24)
+            pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
+            conf_lbl = font(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+            surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
+            self._hit_rects.append((conf_r, "confirm_add_task", None))
+            return fy + 32
 
         # Resource / entity type selector
         if self._add_task_type == "mine" or self._add_task_type == "transport":

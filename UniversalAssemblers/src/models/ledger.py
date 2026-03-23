@@ -202,5 +202,9 @@ def format_ledger_event(
         ship = (ev.get("ship_type") or "ship").replace("_", " ").title()
         return (f"SHIP BUILT: {ship}", (80, 200, 255), CATEGORY_ENTITY, system_id_default)
 
+    if etype == "entity_repaired":
+        category = ev.get("category", "entity")
+        return (f"Repaired {category}", (80, 220, 120), CATEGORY_ENTITY, system_id_default)
+
     # Unknown event type — skip silently
     return None
