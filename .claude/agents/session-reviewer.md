@@ -12,7 +12,9 @@ Parse the hook input to extract `tool_input.command` (the full bash command that
 
 **Exit silently** (do nothing) if either:
 - The command does NOT contain the string `"Why:"` — only analyze implementation commits
-- The command contains `"chore(todo)"` — TODO-cleanup commits are not worth analyzing
+- The commit subject line starts with `chore(` — chore commits (hooks, config, todo-cleanup, etc.) are not worth analyzing
+
+To check the commit subject: `git -C /c/Users/Admin/code/UniversalAssemblers show HEAD --format="%s" -s`
 
 ## Step 1 — Gather session evidence
 

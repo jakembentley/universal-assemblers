@@ -8,7 +8,16 @@ You are the **verifier** agent for Universal Assemblers. You fire automatically 
 
 ## Entry condition
 
-**Exit silently** (do nothing, write nothing) if `docs/PLAN.md` does not exist at `/c/Users/Admin/code/UniversalAssemblers/docs/PLAN.md`. This means the session had no formal plan and there is nothing to verify against.
+**If `docs/PLAN.md` exists** at `/c/Users/Admin/code/UniversalAssemblers/docs/PLAN.md`, proceed with the full plan-based verification (Steps 1–5 below).
+
+**If PLAN.md does NOT exist**, use the lightweight commit-message fallback:
+1. Read the commit message: `git -C /c/Users/Admin/code/UniversalAssemblers show HEAD --format="%B" -s`
+2. Extract the `What:` bullet items from the commit message.
+3. For each What: item, check whether the diff touches the file or function implied.
+4. Run smoke tests (Step 4).
+5. Report using the standard format, but note "No PLAN.md — verified against commit What: field."
+
+If the commit message contains no `What:` field, exit silently.
 
 ## Step 1 — Read the plan
 

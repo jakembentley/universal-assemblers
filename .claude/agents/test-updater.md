@@ -12,9 +12,12 @@ Hook input JSON: $ARGUMENTS
 
 Parse the hook input to extract `tool_input.command` (the full bash command that was run).
 
-**Exit silently** (do nothing) if either of the following is true:
+**Exit silently** (do nothing) if any of the following is true:
 - The command does NOT contain `"git commit"` — only run after commits
 - No `src/` files (excluding `src/gui/`) were touched in the commit
+- The commit subject line starts with `chore(` — chore commits do not add new testable logic
+
+To check the commit subject: `git -C /c/Users/Admin/code/UniversalAssemblers show HEAD --format="%s" -s`
 
 To check which files were committed:
 ```bash
@@ -58,6 +61,11 @@ For each new or changed piece of logic, identify:
 - Happy path: does the normal case work?
 - Edge cases: zero counts, missing keys, invalid states?
 - Invariants: properties that must always hold?
+
+**Conditional guarantee rule:** If the source code guarantees a value only when a condition is met (e.g., "ensure gas >= 20 if gas was absent"), do NOT assert that all seeds produce a value >= the threshold. Instead:
+- Assert using a seed where the triggering condition fires (e.g., a seed that produces no gas naturally), or
+- Assert that at least one seed with the triggering condition produces a value >= the threshold.
+Never treat a conditional minimum as a universal floor — seeds that bypass the condition will not satisfy it.
 
 Focus on **model/logic layer** (`src/models/`, `src/game_state.py`, `src/generator.py`, `src/simulation.py`). Do not attempt to test GUI rendering code.
 
