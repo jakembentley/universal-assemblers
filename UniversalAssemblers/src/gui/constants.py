@@ -23,9 +23,10 @@ TOP_H     = WINDOW_HEIGHT - ENT_H - TASKBAR_H  # height of the two main view pan
 MAP_X     = NAV_W                          # map panel x origin
 MAP_W     = WINDOW_WIDTH - NAV_W          # map panel width
 
-HEADER_H = 26                            # panel title bar height
-ROW_H    = 22                            # list row height
-PADDING  = 8
+HEADER_H    = 26                            # panel title bar height
+ROW_H       = 22                            # list row height
+PADDING     = 8
+RES_STRIP_H = 160                           # global resources strip height
 
 # ---------------------------------------------------------------------------
 # Colours

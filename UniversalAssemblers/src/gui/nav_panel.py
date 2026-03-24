@@ -15,7 +15,7 @@ from __future__ import annotations
 import pygame
 from . import constants as _c
 from .constants import (
-    NAV_W, TASKBAR_H, HEADER_H, ROW_H, PADDING,
+    NAV_W, TASKBAR_H, HEADER_H, ROW_H, PADDING, RES_STRIP_H,
     C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SELECTED, C_HOVER, C_SEP, C_WARN, C_SCROLLBAR, BODY_COLORS, STAR_COLORS,
     font,
@@ -30,13 +30,15 @@ class NavPanel:
         self.app = app
 
         _top_h  = _c.TOP_H
-        _SYS_H  = int(_top_h * 0.28)
-        _BODY_H = int(_top_h * 0.37)
-        _STAT_H = _top_h - _SYS_H - _BODY_H
+        avail   = _top_h - RES_STRIP_H
+        _SYS_H  = int(avail * 0.28)
+        _BODY_H = int(avail * 0.37)
+        _STAT_H = avail - _SYS_H - _BODY_H
 
         sys_rect   = pygame.Rect(0, TASKBAR_H,                       NAV_W, _SYS_H)
         body_rect  = pygame.Rect(0, TASKBAR_H + _SYS_H,             NAV_W, _BODY_H)
         self.stat_rect = pygame.Rect(0, TASKBAR_H + _SYS_H + _BODY_H, NAV_W, _STAT_H)
+        self.res_rect  = pygame.Rect(0, TASKBAR_H + _SYS_H + _BODY_H + _STAT_H, NAV_W, RES_STRIP_H)
 
         self._stat_scroll: int   = 0
         self._stat_content_h: int = 300  # updated each draw pass
@@ -247,6 +249,7 @@ class NavPanel:
         # Draw active name input if present
         if self._name_input is not None:
             self._name_input.draw(surface)
+        self._draw_global_resources(surface)
 
     def _draw_stats(self, surface: pygame.Surface) -> None:
         rect = self.stat_rect
@@ -434,6 +437,85 @@ class NavPanel:
             pygame.draw.rect(surface, C_SCROLLBAR,
                              pygame.Rect(content.right - 5, bar_y, 4, bar_h),
                              border_radius=2)
+
+        surface.set_clip(old_clip)
+
+    # ------------------------------------------------------------------
+    # Global resources strip
+
+    def _draw_global_resources(self, surface: pygame.Surface) -> None:
+        """Draw a strip showing total resource stockpiles across all probed systems."""
+        content = draw_panel(surface, self.res_rect, "Global Resources")
+
+        if self.app.galaxy is None or self.app.game_state is None:
+            msg = font(12).render("No data", True, C_TEXT_DIM)
+            surface.blit(msg, (content.x + PADDING, content.y + PADDING))
+            return
+
+        # Sum resources across all probed systems
+        gs = self.app.game_state
+        _fields = ("minerals", "rare_minerals", "ice", "gas", "bios",
+                   "electronics", "alloys", "fuel_cells", "components")
+        totals = {f: 0.0 for f in _fields}
+        for sys in self.app.galaxy.solar_systems:
+            if not gs.is_probed(sys.id):
+                continue
+            for body in sys.orbital_bodies:
+                for f in _fields:
+                    totals[f] += getattr(body.resources, f, 0)
+                for moon in body.moons:
+                    for f in _fields:
+                        totals[f] += getattr(moon.resources, f, 0)
+
+        old_clip = surface.get_clip()
+        surface.set_clip(content)
+
+        x = content.x + PADDING
+        y = content.y + 4
+
+        # Two-column layout: left and right halves
+        col_w = (content.width - PADDING * 2) // 2
+
+        _labels = {
+            "minerals":      "Minerals",
+            "rare_minerals": "Rare Min",
+            "ice":           "Ice",
+            "gas":           "Gas",
+            "bios":          "Bios",
+            "electronics":   "Electr.",
+            "alloys":        "Alloys",
+            "fuel_cells":    "Fuel Cells",
+            "components":    "Components",
+        }
+        _colors = {
+            "rare_minerals": C_SELECTED,
+            "bios":          (80, 200, 100),
+            "electronics":   (180, 220, 255),
+            "alloys":        (180, 220, 255),
+            "fuel_cells":    (180, 220, 255),
+            "components":    (180, 220, 255),
+        }
+
+        left_fields  = ("minerals", "rare_minerals", "ice", "gas", "bios")
+        right_fields = ("electronics", "alloys", "fuel_cells", "components")
+
+        row_h = ROW_H - 4
+        for i, f in enumerate(left_fields):
+            col   = _colors.get(f, C_TEXT)
+            lbl   = font(11).render(_labels[f], True, C_TEXT_DIM)
+            val   = font(11, bold=True).render(str(int(totals[f])), True, col)
+            ry    = y + i * row_h
+            surface.blit(lbl, (x, ry))
+            surface.blit(val, (x + col_w - val.get_width(), ry))
+
+        rx = x + col_w + PADDING
+        for i, f in enumerate(right_fields):
+            col   = _colors.get(f, C_TEXT)
+            lbl   = font(11).render(_labels[f], True, C_TEXT_DIM)
+            val   = font(11, bold=True).render(str(int(totals[f])), True, col)
+            ry    = y + i * row_h
+            surface.blit(lbl, (rx, ry))
+            surface.blit(val, (content.right - PADDING - val.get_width(), ry))
 
         surface.set_clip(old_clip)
 
