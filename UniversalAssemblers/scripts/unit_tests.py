@@ -2041,6 +2041,72 @@ except Exception as e:
     fail("ship repair blocked without shipyard (exception)", f"unexpected exception: {e}")
 
 
+# ─── wrong-location task (registered at system ID, no bots there) ────────────
+section("wrong-location task silently never executes")
+
+try:
+    gs_wl = _fresh_gs()
+    _wl_sys    = gs_wl.galaxy.solar_systems[0].id
+    _wl_body   = gs_wl.galaxy.solar_systems[0].orbital_bodies[0].id
+    # Place a factory with damage, and logistic bots at the *body* level
+    gs_wl.entity_roster.add("structure", "factory", _wl_body, 1)
+    gs_wl.apply_damage(_wl_body, "structure", "factory", 50)
+    dmg_key_wl = gs_wl._damage_key(_wl_body, "structure", "factory")
+    dmg_before_wl = gs_wl.entity_damage[dmg_key_wl]
+    gs_wl.entity_roster.add("bot", "logistic_bot", _wl_body, 3)
+    # Register the repair task at the *system* ID (the bug scenario)
+    wrong_loc_task = BotTask(
+        task_type="repair",
+        resource="structure",
+        entity_type=None,
+        target_amount=0,
+        allocation=100,
+    )
+    gs_wl.bot_tasks.add(_wl_sys, "logistic_bot", wrong_loc_task)
+    gs_wl.sim_engine._tick_bot_tasks(1.0)
+    dmg_after_wl = gs_wl.entity_damage.get(dmg_key_wl, dmg_before_wl)
+    assert dmg_after_wl == dmg_before_wl, (
+        f"task at system-level ID should not reduce damage "
+        f"(bot_count==0 there), was {dmg_before_wl}, now {dmg_after_wl}"
+    )
+    ok("wrong-location task (system ID) never executes because bot_count==0 there")
+except AssertionError as e:
+    fail("wrong-location task silently skipped", str(e))
+except Exception as e:
+    fail("wrong-location task silently skipped (exception)", f"unexpected exception: {e}")
+
+
+# ─── capability guard: miskeyed task type is silently skipped ─────────────────
+section("capability guard: miskeyed task type skipped by simulation")
+
+try:
+    gs_cap = _fresh_gs()
+    _cap_body = gs_cap.galaxy.solar_systems[0].orbital_bodies[0].id
+    # Place logistic bots (capability: transport, repair — NOT mine)
+    gs_cap.entity_roster.add("bot", "logistic_bot", _cap_body, 2)
+    # Add a mine task under the logistic_bot key — this is a capability mismatch
+    mine_task_mismatch = BotTask(
+        task_type="mine",
+        resource="minerals",
+        entity_type=None,
+        target_amount=500,
+        allocation=100,
+    )
+    gs_cap.bot_tasks.add(_cap_body, "logistic_bot", mine_task_mismatch)
+    progress_before = mine_task_mismatch.progress
+    gs_cap.sim_engine._tick_bot_tasks(1.0)
+    progress_after = mine_task_mismatch.progress
+    assert progress_after == progress_before, (
+        f"mine task under logistic_bot should not execute (capability mismatch), "
+        f"progress was {progress_before}, now {progress_after}"
+    )
+    ok("capability guard: mine task under logistic_bot is silently skipped")
+except AssertionError as e:
+    fail("capability guard skips miskeyed task", str(e))
+except Exception as e:
+    fail("capability guard skips miskeyed task (exception)", f"unexpected exception: {e}")
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")

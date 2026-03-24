@@ -83,7 +83,8 @@ _MINE_RES_LABELS = {
     "bios":          "Bios",
 }
 
-# Which task types each bot type is allowed to add
+# Which task types each bot type is allowed to add.
+# Must stay in sync with _BOT_TASK_CAPABILITIES in src/simulation.py.
 _BOT_ALLOWED_TASKS: dict[str, list[str]] = {
     "miner":        ["mine"],
     "harvester":    ["mine"],
@@ -503,6 +504,15 @@ class EntityView:
             return
         loc = self._body_id or self._system_id or ""
 
+        # Defence-in-depth: bot tasks must be assigned at a body-level location.
+        # If _body_id is None the loc falls back to a system ID, which would mean
+        # bot_count == 0 at tick time and the task would silently never execute.
+        if action == "confirm_add_task":
+            allowed = _BOT_ALLOWED_TASKS.get(self._type_value, [])
+            if self._type_value in _BOT_ALLOWED_TASKS and "_body_" not in loc:
+                self.app.show_toast("No planet selected for this task")
+                return
+
         if action == "toggle_add_task":
             self._add_task_mode = not self._add_task_mode
 
@@ -547,6 +557,14 @@ class EntityView:
                     target_location=self._transport_target_body,
                 )
             elif self._add_task_type == "repair":
+                # Step 3: enforce shipyard presence for ship repair at assignment time
+                if self._add_task_res == "ship":
+                    if not any(
+                        i.type_value == "shipyard"
+                        for i in gs.entity_roster.at(loc)
+                    ):
+                        self.app.show_toast("Ship repair requires a Shipyard here")
+                        return
                 task = BotTask(
                     task_type="repair",
                     resource=self._add_task_res or "structure",
@@ -1309,15 +1327,36 @@ class EntityView:
                 surface.blit(clbl, clbl.get_rect(center=cr.center))
                 self._hit_rects.append((cr, "set_res", cat))
             fy += 28
-            note_s = font(10).render("Requires shipyard at location (ship repair)", True, (120, 120, 140))
+            # Step 4: check shipyard presence to conditionally dim confirm button
+            gs_draw = self.app.game_state
+            loc_draw = self._body_id or self._system_id or ""
+            ship_repair_needs_shipyard = self._add_task_res == "ship"
+            has_shipyard = (
+                gs_draw is not None
+                and any(
+                    i.type_value == "shipyard"
+                    for i in gs_draw.entity_roster.at(loc_draw)
+                )
+            )
+            if ship_repair_needs_shipyard and not has_shipyard:
+                note_txt = "Ship repair requires a Shipyard here"
+                note_col = (200, 100, 100)
+            else:
+                note_txt = "Requires shipyard at location (ship repair)"
+                note_col = (120, 120, 140)
+            note_s = font(10).render(note_txt, True, note_col)
             surface.blit(note_s, (fx, fy))
             fy += 18
-            # Confirm button
+            # Confirm button — dimmed and non-clickable when shipyard required but absent
             conf_r = pygame.Rect(fx, fy, 100, 24)
-            pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
-            conf_lbl = font(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+            confirm_disabled = ship_repair_needs_shipyard and not has_shipyard
+            btn_col = (60, 60, 60) if confirm_disabled else (0, 120, 80)
+            lbl_col = (120, 120, 120) if confirm_disabled else (200, 255, 220)
+            pygame.draw.rect(surface, btn_col, conf_r, border_radius=4)
+            conf_lbl = font(12, bold=True).render("CONFIRM", True, lbl_col)
             surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
-            self._hit_rects.append((conf_r, "confirm_add_task", None))
+            if not confirm_disabled:
+                self._hit_rects.append((conf_r, "confirm_add_task", None))
             return fy + 32
 
         # Resource / entity type selector

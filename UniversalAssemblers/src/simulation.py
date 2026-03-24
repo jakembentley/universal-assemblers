@@ -220,6 +220,14 @@ _BUILD_RATES: dict[str, float] = {
 
 _REPAIR_RATE = 20  # HP restored per logistic bot per year at 100% allocation
 
+# Must stay in sync with _BOT_ALLOWED_TASKS in src/gui/entity_view.py
+_BOT_TASK_CAPABILITIES: dict[str, set[str]] = {
+    "miner":        {"mine"},
+    "harvester":    {"mine"},
+    "constructor":  {"build"},
+    "logistic_bot": {"transport", "repair"},
+}
+
 # Ship type_values that constructors can build
 _SHIP_TYPES: frozenset[str] = frozenset({
     "probe", "drop_ship", "mining_vessel", "transport", "warship",
@@ -865,6 +873,11 @@ class SimulationEngine:
             for task in tasks:
                 if task.complete:
                     completed_ids.append(task.task_id)
+                    continue
+                # Capability guard: skip tasks miskeyed to the wrong bot type.
+                # Cross-reference: _BOT_ALLOWED_TASKS in src/gui/entity_view.py
+                # must stay in sync with _BOT_TASK_CAPABILITIES above.
+                if task.task_type not in _BOT_TASK_CAPABILITIES.get(bot_type, set()):
                     continue
 
                 alloc_frac     = task.allocation / 100.0

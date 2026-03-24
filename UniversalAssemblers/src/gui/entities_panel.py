@@ -94,6 +94,9 @@ class EntitiesPanel:
                         sys    = self.app.selected_system
                         sys_id = sys.id if sys else None
                         body_id = self.app.selected_body_id
+                        if category == "bot" and body_id is None:
+                            self.app.show_toast("Select a planet first")
+                            return
                         if category == "ship":
                             body_id = None
                             # Open entity view at the system where ships actually are.
