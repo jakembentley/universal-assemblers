@@ -22,6 +22,7 @@ from .tech_view import TechView
 from .energy_view import EnergyView
 from .queue_view import QueueView
 from .ledger_view import LedgerView
+from .help_view import HelpView
 from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
@@ -56,6 +57,7 @@ class App:
         self.energy_view    = EnergyView(self)
         self.queue_view     = QueueView(self)
         self.ledger_view    = LedgerView(self)
+        self.help_view      = HelpView(self)
         self.tooltip        = Tooltip()
         self.new_game_panel = NewGamePanel(self)
 
@@ -168,6 +170,17 @@ class App:
     def close_ledger_view(self) -> None:
         self.ledger_view.deactivate()
 
+    def open_help_view(self, entity_type: str | None = None) -> None:
+        self.entity_view.deactivate()
+        self.tech_view.deactivate()
+        self.energy_view.deactivate()
+        self.queue_view.deactivate()
+        self.ledger_view.deactivate()
+        self.help_view.activate(entity_type)
+
+    def close_help_view(self) -> None:
+        self.help_view.deactivate()
+
     # ------------------------------------------------------------------
     # Menu actions
 
@@ -203,6 +216,8 @@ class App:
         """Save game. slot=-1 → quicksave, slot=0-2 → autosave ring buffer."""
         if not self.galaxy or not self.game_state:
             return
+        from src.logger import log_snapshot
+        log_snapshot(self.game_state, reason=f"save slot={slot}")
         os.makedirs("maps", exist_ok=True)
         from ..generator import MapGenerator as _MG
         if slot == -1:
@@ -230,7 +245,9 @@ class App:
         slot_path = "maps/autosave_slot.txt"
         try:
             slot = int(open(slot_path).read().strip()) if os.path.exists(slot_path) else 0
-        except Exception:
+        except Exception as exc:
+            from src.logger import get_logger as _gl
+            _gl("ua.app").warning("[autosave] Failed to read slot file '%s': %s", slot_path, exc)
             slot = 0
         slot = slot % 3
         self.save_game(slot=slot)
@@ -266,6 +283,12 @@ class App:
                 self.game_state = GameState.new_game(self.galaxy, home_idx=0)
 
         except Exception as exc:
+            import traceback as _tb
+            from src.logger import get_logger as _gl
+            _gl("ua.app").error(
+                "[load_game] Failed to load '%s': %s\n%s",
+                path, exc, _tb.format_exc(),
+            )
             print(f"[load_game] Failed to load '{path}': {exc}")
             return
 
@@ -320,6 +343,7 @@ class App:
         self.energy_view = EnergyView(self)
         self.queue_view  = QueueView(self)
         self.ledger_view = LedgerView(self)
+        self.help_view   = HelpView(self)
         if self.galaxy_view:
             self.galaxy_view = GalaxyView(self)
         if self.game_view:
@@ -475,6 +499,10 @@ class App:
                 continue
             self._notifications.append((msg, now + TTL, col))
 
+    def show_toast(self, message: str, color: tuple = (255, 200, 80), ttl: int = 3000) -> None:
+        now = pygame.time.get_ticks()
+        self._notifications.append((message, now + ttl, color))
+
     def _draw_notifications(self, surface: pygame.Surface) -> None:
         if not self._notifications:
             return
@@ -567,9 +595,16 @@ class App:
             for event in events:
                 if event.type == pygame.QUIT:
                     self.quit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.tooltip.handle_click(event.pos):
+                        hover = self.tooltip.hover_id
+                        if isinstance(hover, str) and hover.startswith("ent:"):
+                            self.open_help_view(hover[4:])
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.ledger_view.is_active:
+                        if self.help_view.is_active:
+                            self.close_help_view()
+                        elif self.ledger_view.is_active:
                             self.close_ledger_view()
                         elif self.queue_view.is_active:
                             self.close_queue_view()
@@ -619,7 +654,7 @@ class App:
             elif self.state == "galaxy" and self.galaxy_view:
                 overlays_active = (self.pause_menu.is_active or self.tech_view.is_active
                                    or self.energy_view.is_active or self.queue_view.is_active
-                                   or self.ledger_view.is_active)
+                                   or self.ledger_view.is_active or self.help_view.is_active)
                 if not overlays_active:
                     self.galaxy_view.handle_events(events)
                 self.galaxy_view.draw(self.screen)
@@ -629,6 +664,7 @@ class App:
                     or self.energy_view.is_active
                     or self.queue_view.is_active
                     or self.ledger_view.is_active
+                    or self.help_view.is_active
                 )
                 if not self.pause_menu.is_active:
                     self.game_view.handle_events(events, overlays_active=modal_overlays_active)
@@ -661,6 +697,11 @@ class App:
             if self.ledger_view.is_active:
                 self.ledger_view.handle_events(events)
                 self.ledger_view.draw(self.screen)
+
+            # Help guide overlay
+            if self.help_view.is_active:
+                self.help_view.handle_events(events)
+                self.help_view.draw(self.screen)
 
             # Tooltip — drawn last so it appears above everything
             self.tooltip.draw(self.screen)

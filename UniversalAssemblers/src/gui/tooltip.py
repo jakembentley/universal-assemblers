@@ -28,6 +28,11 @@ class Tooltip:
         self._hover_since: int                     = 0
         self._lines:       list[tuple[str, tuple]] = []
         self._pos:         tuple[int, int]         = (0, 0)
+        self.hit_rect:     "pygame.Rect | None"    = None
+
+    @property
+    def hover_id(self) -> object:
+        return self._hover_id
 
     # ------------------------------------------------------------------
 
@@ -51,7 +56,12 @@ class Tooltip:
 
     # ------------------------------------------------------------------
 
+    def handle_click(self, pos: tuple[int, int]) -> bool:
+        """Return True if *pos* falls on the currently-visible tooltip."""
+        return self.hit_rect is not None and self.hit_rect.collidepoint(pos)
+
     def draw(self, surface: pygame.Surface) -> None:
+        self.hit_rect = None
         now = pygame.time.get_ticks()
         if not self._hover_id or not self._lines:
             return
@@ -73,6 +83,8 @@ class Tooltip:
             tx = mx - w - 8
         if ty + h > WINDOW_HEIGHT - 4:
             ty = my - h - 8
+
+        self.hit_rect = pygame.Rect(tx, ty, w, h)
 
         bg = pygame.Surface((w, h), pygame.SRCALPHA)
         bg.fill((6, 10, 26, 225))

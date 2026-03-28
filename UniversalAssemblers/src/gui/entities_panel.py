@@ -203,6 +203,31 @@ class EntitiesPanel:
     # ------------------------------------------------------------------
     # Tooltip helper
 
+    _ENTITY_ACTIONS: dict[str, list[str]] = {
+        "extractor":               ["Assign Miner bots to boost yield"],
+        "factory":                 ["View active recipes in entity panel"],
+        "power_plant_solar":       ["Produces energy passively"],
+        "power_plant_wind":        ["Produces energy passively"],
+        "power_plant_bios":        ["Consumes bios; offline if empty"],
+        "power_plant_fossil":      ["Consumes gas; resource depletes"],
+        "power_plant_nuclear":     ["Consumes rare minerals for power"],
+        "power_plant_cold_fusion": ["Consumes ice; high output"],
+        "power_plant_dark_matter": ["Limitless output; no fuel needed"],
+        "research_array":          ["Generates research points passively"],
+        "replicator":              ["Self-builds structures autonomously"],
+        "shipyard":                ["Queue ship construction via panel"],
+        "storage_hub":             ["Buffers resources on this body"],
+        "miner":                   ["Assign mine tasks via task panel"],
+        "constructor":             ["Assign build tasks via task panel"],
+        "logistic_bot":            ["Automates resource transfers"],
+        "harvester":               ["Harvests bios from bio populations"],
+        "probe":                   ["Send to unexplored systems to scout"],
+        "drop_ship":               ["Delivers bots to a target body"],
+        "mining_vessel":           ["Extracts resources from remote bodies"],
+        "transport":               ["Ferries resources between systems"],
+        "warship":                 ["Combat vessel; patrol or attack"],
+    }
+
     _ENTITY_DESCS: dict[str, str] = {
         "extractor":                 "Mines raw minerals, ice and gas from deposits.",
         "factory":                   "Manufactures electronics, alloys and components.",
@@ -231,7 +256,7 @@ class EntitiesPanel:
     def _build_entity_tooltip(
         self, category: str, type_val: str
     ) -> list[tuple[str, tuple]]:
-        from .constants import C_ACCENT, C_TEXT_DIM, C_WARN
+        from .constants import C_ACCENT, C_TEXT, C_TEXT_DIM, C_WARN
         gs      = self.app.game_state
         sys_    = self.app.selected_system
         body_id = self.app.selected_body_id
@@ -270,5 +295,28 @@ class EntitiesPanel:
             ec = ENERGY_CONSUMPTION.get(type_val, 0.0)
             if ec > 0:
                 lines.append((f"Energy: -{ec:.0f} / yr", C_WARN))
+
+        # Action hints
+        if type_val in self._ENTITY_ACTIONS:
+            lines.append(("", C_TEXT_DIM))
+            for hint in self._ENTITY_ACTIONS[type_val]:
+                lines.append((f"  \u00b7 {hint}", C_TEXT))
+
+        # Build cost
+        from ..models.entity import BUILD_COSTS
+        cost = BUILD_COSTS.get(type_val, {})
+        if cost:
+            _ABBREV = {"minerals": "min", "rare_minerals": "rare",
+                       "ice": "ice", "gas": "gas", "electronics": "elec"}
+            parts = [f"{_ABBREV.get(k, k)}:{int(v)}" for k, v in cost.items()]
+            lines.append(("", C_TEXT_DIM))
+            lines.append(("Build cost:", C_TEXT_DIM))
+            mid = (len(parts) + 1) // 2
+            lines.append(("  " + "  ".join(parts[:mid]), C_TEXT_DIM))
+            if parts[mid:]:
+                lines.append(("  " + "  ".join(parts[mid:]), C_TEXT_DIM))
+
+        # CTA
+        lines.append(("  \u2192 Click tooltip for guide", C_ACCENT))
 
         return lines
