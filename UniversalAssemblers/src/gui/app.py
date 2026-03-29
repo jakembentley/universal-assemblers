@@ -100,6 +100,23 @@ class App:
             return
         self._selected_system_idx = idx
         self.selected_body_id     = None
+        # Auto-select home planet when entering the home system so structures
+        # are immediately visible in the entities panel (not hidden behind a
+        # "0 here" count caused by no-body-selected sys_id fallback).
+        if self.game_state and self.game_state.home_body_id:
+            sys_obj = self.selected_system
+            if sys_obj:
+                home_id = self.game_state.home_body_id
+                for _body in sys_obj.orbital_bodies:
+                    if _body.id == home_id:
+                        self.selected_body_id = home_id
+                        break
+                    for _moon in _body.moons:
+                        if _moon.id == home_id:
+                            self.selected_body_id = home_id
+                            break
+                    if self.selected_body_id:
+                        break
         if self.game_view is None:
             self.game_view = GameView(self)
         else:

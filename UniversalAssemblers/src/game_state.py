@@ -486,6 +486,7 @@ class GameState:
         self.body_env: dict[str, dict] = {}
         self._victory_declared: bool = False
         self.in_game_years: float = 0.0
+        self.home_body_id: str = ""
 
     # ------------------------------------------------------------------
     # Factory
@@ -529,6 +530,7 @@ class GameState:
         if best_body is None and home.orbital_bodies:
             best_body = home.orbital_bodies[0]
         home_body_id = best_body.id if best_body else home.id
+        gs.home_body_id = home_body_id
         for cat, type_val, loc_token, count in STARTING_ENTITIES:
             loc_id = home_system_id if loc_token == "home_system" else home_body_id
             gs.entity_roster.add(cat, type_val, loc_id, count)
@@ -803,6 +805,7 @@ class GameState:
         from .simulation import BioPopulation as _BP  # noqa: F401
         return {
             "version": 2,
+            "home_body_id":         self.home_body_id,
             "in_game_years":        self.in_game_years,
             "discovery_states":     {k: v.value for k, v in self._states.items()},
             "probed_systems":       list(self.probed_systems),
@@ -839,6 +842,7 @@ class GameState:
         for sys_id, state_val in d.get("discovery_states", {}).items():
             gs._states[sys_id] = DiscoveryState(state_val)
 
+        gs.home_body_id          = d.get("home_body_id", "")
         gs.in_game_years         = float(d.get("in_game_years", 0.0))
         gs.probed_systems        = set(d.get("probed_systems", []))
         gs.entity_roster         = EntityRoster.from_dict(d.get("entity_roster", {}))
