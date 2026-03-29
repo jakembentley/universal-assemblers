@@ -81,9 +81,11 @@ class MapPanel:
                         lines = self._build_tooltip(hit_id)
                         self.app.tooltip.set_hover(hit_id, lines, event.pos)
                     else:
-                        self.app.tooltip.clear_hover()
+                        if not str(self.app.tooltip.hover_id or "").startswith("ent:"):
+                            self.app.tooltip.clear_hover()
                 else:
-                    self.app.tooltip.clear_hover()
+                    if not str(self.app.tooltip.hover_id or "").startswith("ent:"):
+                        self.app.tooltip.clear_hover()
                 continue
 
             if not self.rect.collidepoint(pygame.mouse.get_pos()):

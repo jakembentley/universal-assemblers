@@ -588,6 +588,7 @@ class HelpView:
 
     def activate(self, entity_type: str | None = None) -> None:
         self.is_active       = True
+        self._just_opened    = True
         self._selected       = entity_type if entity_type in _GUIDE_DATA else _ALL_KEYS[0]
         self._scroll_y       = 0
         self._sidebar_scroll = 0
@@ -610,6 +611,10 @@ class HelpView:
                 return
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # Ignore the click that opened this overlay (same-frame dismiss guard)
+                if self._just_opened:
+                    self._just_opened = False
+                    continue
                 # Outside overlay → close
                 if not self._rect.collidepoint(event.pos):
                     self._close()

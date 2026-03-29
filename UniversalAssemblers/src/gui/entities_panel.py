@@ -84,9 +84,13 @@ class EntitiesPanel:
                         lines = self._build_entity_tooltip(cat, tv)
                         self.app.tooltip.set_hover(f"ent:{tv}", lines, event.pos)
                     else:
-                        self.app.tooltip.clear_hover()
+                        hid = self.app.tooltip.hover_id
+                        if hid is None or str(hid).startswith("ent:"):
+                            self.app.tooltip.clear_hover()
                 else:
-                    self.app.tooltip.clear_hover()
+                    hid = self.app.tooltip.hover_id
+                    if hid is None or str(hid).startswith("ent:"):
+                        self.app.tooltip.clear_hover()
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for rect, category, type_val in self._hit_rects:

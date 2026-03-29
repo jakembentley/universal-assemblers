@@ -282,8 +282,12 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
                     if gs.power_plant_active.get(flag_key, True):
                         modifier = compute_power_modifier(gs, body_id, inst.type_value)
                         production += POWER_PLANT_SPECS[st].base_output * inst.count * modifier
-            except ValueError:
-                pass
+            except ValueError as exc:
+                from src.logger import get_logger as _gl
+                _gl("ua.entity").warning(
+                    "[power_output] ValueError body_id=%s type=%s: %s",
+                    body_id, inst.type_value, exc,
+                )
             cons = ENERGY_CONSUMPTION.get(inst.type_value, 0.0)
             consumption += cons * inst.count
         elif inst.category == "bot":

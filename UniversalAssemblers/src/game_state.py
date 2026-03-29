@@ -19,6 +19,12 @@ if TYPE_CHECKING:
     from .models.celestial import Galaxy
 
 
+def _get_logger():
+    """Lazy logger accessor — safe before setup() and in headless tests."""
+    from src.logger import get_logger
+    return get_logger("ua.game_state")
+
+
 # ---------------------------------------------------------------------------
 # Bot tasks
 # ---------------------------------------------------------------------------
@@ -538,6 +544,8 @@ class GameState:
         gs.sim_engine = SimulationEngine(gs)
         gs._rebuild_body_env()
 
+        from src.logger import log_snapshot
+        log_snapshot(gs, reason="new_game")
         return gs
 
     def _init_bio_state(self) -> None:
@@ -622,6 +630,10 @@ class GameState:
                 system_id=system_id,
             ))
         if new_entries:
+            log = _get_logger()
+            for entry in new_entries:
+                log.info("[ledger] y=%.2f  %-20s  %s",
+                         entry.tick_year, entry.event_type, entry.message)
             self._ledger = new_entries + self._ledger
             self._ledger = self._ledger[:self._LEDGER_MAX]
 
@@ -864,4 +876,6 @@ class GameState:
         gs.sim_engine = SimulationEngine(gs)
         gs._rebuild_body_env()
 
+        from src.logger import log_snapshot
+        log_snapshot(gs, reason="load_game")
         return gs

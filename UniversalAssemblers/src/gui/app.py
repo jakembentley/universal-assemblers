@@ -352,6 +352,8 @@ class App:
     def quit(self) -> None:
         if self.galaxy and self.game_state:
             self._autosave()
+        import logging as _logging
+        _logging.shutdown()
         pygame.quit()
         sys.exit()
 
