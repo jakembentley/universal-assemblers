@@ -18,6 +18,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--debug", action="store_true",
         help="Enable DEBUG-level logging to logs/session_*.log",
     )
+    p.add_argument(
+        "--dev", action="store_true",
+        help="Open the debug HUD overlay (F12) on startup",
+    )
     return p
 
 
@@ -27,7 +31,10 @@ if __name__ == "__main__":
     _log = _logger.get_logger("ua.main")
 
     try:
-        App().run()
+        app = App()
+        if args.dev:
+            app.debug_view.activate()
+        app.run()
     except SystemExit:
         raise  # normal quit() path — do not log
     except Exception:

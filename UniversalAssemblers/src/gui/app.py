@@ -23,6 +23,7 @@ from .energy_view import EnergyView
 from .queue_view import QueueView
 from .ledger_view import LedgerView
 from .help_view import HelpView
+from .debug_view import DebugView
 from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
@@ -59,6 +60,7 @@ class App:
         self.ledger_view    = LedgerView(self)
         self.help_view      = HelpView(self)
         self.tooltip        = Tooltip()
+        self.debug_view     = DebugView(self)
         self.new_game_panel = NewGamePanel(self)
 
         # Toast notifications: each entry is (message, expiry_ms, color)
@@ -197,6 +199,13 @@ class App:
 
     def close_help_view(self) -> None:
         self.help_view.deactivate()
+
+    def open_debug_view(self) -> None:
+        # Debug overlay is non-exclusive: it does NOT deactivate other overlays
+        self.debug_view.activate()
+
+    def close_debug_view(self) -> None:
+        self.debug_view.deactivate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -361,6 +370,7 @@ class App:
         self.queue_view  = QueueView(self)
         self.ledger_view = LedgerView(self)
         self.help_view   = HelpView(self)
+        self.debug_view  = DebugView(self)
         if self.galaxy_view:
             self.galaxy_view = GalaxyView(self)
         if self.game_view:
@@ -621,7 +631,9 @@ class App:
                             self.open_help_view(hover[4:])
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.help_view.is_active:
+                        if self.debug_view.is_active:
+                            self.close_debug_view()
+                        elif self.help_view.is_active:
                             self.close_help_view()
                         elif self.ledger_view.is_active:
                             self.close_ledger_view()
@@ -651,6 +663,11 @@ class App:
                     if event.key == pygame.K_F9:
                         if self.state in ("galaxy", "system"):
                             self._quickload()
+                    if event.key == pygame.K_F12:
+                        if self.debug_view.is_active:
+                            self.close_debug_view()
+                        else:
+                            self.open_debug_view()
                 self.game_clock.handle_event(event)   # speed badge click
 
             # Clock + simulation update
@@ -721,6 +738,11 @@ class App:
             if self.help_view.is_active:
                 self.help_view.handle_events(events)
                 self.help_view.draw(self.screen)
+
+            # Debug HUD overlay (F12) — drawn above all game overlays, below tooltip
+            if self.debug_view.is_active:
+                self.debug_view.handle_events(events)
+                self.debug_view.draw(self.screen)
 
             # Tooltip — drawn last so it appears above everything
             self.tooltip.draw(self.screen)

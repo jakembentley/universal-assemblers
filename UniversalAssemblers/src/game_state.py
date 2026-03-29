@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import random
 import uuid as _uuid
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -487,6 +488,8 @@ class GameState:
         self._victory_declared: bool = False
         self.in_game_years: float = 0.0
         self.home_body_id: str = ""
+        self.tick_count: int = 0
+        self._debug_event_log: deque = deque(maxlen=30)
 
     # ------------------------------------------------------------------
     # Factory
@@ -600,15 +603,28 @@ class GameState:
 
     def tick(self, dt_years: float) -> None:
         """Advance the non-player simulation. Called every game frame when unpaused."""
+        self.tick_count += 1
         self.in_game_years += dt_years
         self._sim_events = self.sim_engine.tick(dt_years)
         self._ingest_events_to_ledger(self._sim_events)
+        for ev in self._sim_events:
+            kind = ev.get("type", "?")
+            body = ", ".join(
+                f"{k}={v}" for k, v in ev.items()
+                if k != "type" and v is not None
+            )
+            self._debug_event_log.appendleft(f"{kind}: {body}" if body else kind)
 
     def pop_sim_events(self) -> list:
         """Return and clear the most-recent sim events (for UI notification)."""
         events = list(self._sim_events)
         self._sim_events = []
         return events
+
+    @property
+    def debug_event_log(self) -> list:
+        """Read-only snapshot of the last 30 sim event summaries (most-recent first)."""
+        return list(self._debug_event_log)
 
     def _ingest_events_to_ledger(self, events: list) -> None:
         """Convert raw sim events into LedgerEntry records and prepend to _ledger."""
