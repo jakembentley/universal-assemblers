@@ -20,12 +20,6 @@ if TYPE_CHECKING:
     pass  # App imported at runtime
 
 
-_PANEL_W = 320
-_PANEL_H = 460
-_BTN_W   = 260
-_BTN_H   = 48
-_BTN_GAP = 12
-
 _RESOLUTIONS = [
     ("1280 × 800",   1280,  800),
     ("1280 × 960",   1280,  960),
@@ -33,13 +27,6 @@ _RESOLUTIONS = [
     ("1920 × 1080",  1920, 1080),
     ("2560 × 1440",  2560, 1440),
 ]
-
-
-def _make_button(label: str, panel_rect: pygame.Rect, row: int, cb) -> Button:
-    """Helper: create a centred button inside the panel at the given row."""
-    x = panel_rect.x + (_PANEL_W - _BTN_W) // 2
-    y = panel_rect.y + 80 + row * (_BTN_H + _BTN_GAP)
-    return Button((x, y, _BTN_W, _BTN_H), label, callback=cb, font_size=16)
 
 
 class PauseMenu:
@@ -50,28 +37,61 @@ class PauseMenu:
         self._sub_active: bool     = False
         self._settings_active: bool = False
 
+        # Scaled panel dimensions
+        panel_w = _c.scaled(320)
+        panel_h = _c.scaled(520)   # extra height for display-mode row
+        btn_w   = _c.scaled(260)
+        btn_h   = _c.scaled(48)
+        btn_gap = _c.scaled(12)
+
         # Panel geometry (centred on screen)
-        px = (_c.WINDOW_WIDTH  - _PANEL_W) // 2
-        py = (_c.WINDOW_HEIGHT - _PANEL_H) // 2
-        self._panel_rect = pygame.Rect(px, py, _PANEL_W, _PANEL_H)
+        px = (_c.WINDOW_WIDTH  - panel_w) // 2
+        py = (_c.WINDOW_HEIGHT - panel_h) // 2
+        self._panel_rect = pygame.Rect(px, py, panel_w, panel_h)
+
+        def _make_button(label: str, row: int, cb) -> Button:
+            x = self._panel_rect.x + (panel_w - btn_w) // 2
+            y = self._panel_rect.y + _c.scaled(80) + row * (btn_h + btn_gap)
+            return Button((x, y, btn_w, btn_h), label, callback=cb,
+                          font_size=_c.scaled(16))
 
         # Pre-build button lists (callbacks reference self so lambdas are fine)
         self._main_buttons: list[Button] = [
-            _make_button("RESUME",    self._panel_rect, 0, self._resume),
-            _make_button("SAVE GAME", self._panel_rect, 1, self._save),
-            _make_button("LOAD GAME", self._panel_rect, 2, self._load),
-            _make_button("SETTINGS",  self._panel_rect, 3, self._open_settings_sub),
-            _make_button("EXIT GAME", self._panel_rect, 4, self._open_exit_sub),
+            _make_button("RESUME",    0, self._resume),
+            _make_button("SAVE GAME", 1, self._save),
+            _make_button("LOAD GAME", 2, self._load),
+            _make_button("SETTINGS",  3, self._open_settings_sub),
+            _make_button("EXIT GAME", 4, self._open_exit_sub),
         ]
         self._sub_buttons: list[Button] = [
-            _make_button("EXIT TO MENU",    self._panel_rect, 0, self._exit_to_menu),
-            _make_button("EXIT TO DESKTOP", self._panel_rect, 1, self._exit_to_desktop),
-            _make_button("◀  BACK",         self._panel_rect, 2, self._close_exit_sub),
+            _make_button("EXIT TO MENU",    0, self._exit_to_menu),
+            _make_button("EXIT TO DESKTOP", 1, self._exit_to_desktop),
+            _make_button("◀  BACK",         2, self._close_exit_sub),
         ]
         self._settings_buttons: list[Button] = [
-            _make_button(label, self._panel_rect, i, self._make_res_callback(w, h))
+            _make_button(label, i, self._make_res_callback(w, h))
             for i, (label, w, h) in enumerate(_RESOLUTIONS)
-        ] + [_make_button("◀  BACK", self._panel_rect, len(_RESOLUTIONS), self._close_settings_sub)]
+        ] + [_make_button("◀  BACK", len(_RESOLUTIONS), self._close_settings_sub)]
+
+        # Display-mode toggle buttons (Windowed | Borderless | Fullscreen)
+        # Placed below the resolution list row
+        from .app import DISPLAY_WINDOWED, DISPLAY_BORDERLESS, DISPLAY_FULLSCREEN
+        _dm_labels = [
+            ("Windowed",   DISPLAY_WINDOWED),
+            ("Borderless", DISPLAY_BORDERLESS),
+            ("Fullscreen", DISPLAY_FULLSCREEN),
+        ]
+        dm_btn_w = _c.scaled(82)
+        dm_btn_h = _c.scaled(28)
+        dm_gap   = _c.scaled(6)
+        dm_total = len(_dm_labels) * dm_btn_w + (len(_dm_labels) - 1) * dm_gap
+        dm_start_x = self._panel_rect.x + (panel_w - dm_total) // 2
+        dm_y = self._panel_rect.y + _c.scaled(80) + (len(_RESOLUTIONS) + 1) * (btn_h + btn_gap) + _c.scaled(8)
+        self._dm_btns: list[tuple[pygame.Rect, str]] = []
+        for i, (lbl, mode) in enumerate(_dm_labels):
+            r = pygame.Rect(dm_start_x + i * (dm_btn_w + dm_gap), dm_y, dm_btn_w, dm_btn_h)
+            self._dm_btns.append((r, mode))
+        self._dm_labels_map = {mode: lbl for lbl, mode in _dm_labels}
 
         # Reusable dim overlay surface
         self._dim = pygame.Surface((_c.WINDOW_WIDTH, _c.WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -93,6 +113,8 @@ class PauseMenu:
 
     def _save(self) -> None:
         self.app.save_game()
+        now = pygame.time.get_ticks()
+        self.app._notifications.append(("GAME SAVED", now + 3000, (80, 220, 120)))
 
     def _load(self) -> None:
         self.app.load_game()
@@ -137,6 +159,15 @@ class PauseMenu:
         for event in events:
             for btn in buttons:
                 btn.handle_event(event)
+            # Display-mode buttons visible in settings sub-panel
+            if self._settings_active and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for rect, mode in self._dm_btns:
+                    if rect.collidepoint(event.pos):
+                        self.app.change_display_mode(mode)
+                        return
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                self.is_active = False
+                return
 
     # ------------------------------------------------------------------
     # Drawing
@@ -150,13 +181,13 @@ class PauseMenu:
         pygame.draw.rect(surface, C_BORDER, self._panel_rect, width=2, border_radius=8)
 
         # 3. "PAUSED" title
-        title = font(22, bold=True).render("PAUSED", True, C_ACCENT)
-        tx = self._panel_rect.x + (_PANEL_W - title.get_width()) // 2
-        ty = self._panel_rect.y + 28
+        title = font(_c.scaled(22), bold=True).render("PAUSED", True, C_ACCENT)
+        tx = self._panel_rect.x + (self._panel_rect.width - title.get_width()) // 2
+        ty = self._panel_rect.y + _c.scaled(28)
         surface.blit(title, (tx, ty))
 
         # Subtle divider under title
-        div_y = ty + title.get_height() + 12
+        div_y = ty + title.get_height() + _c.scaled(12)
         pygame.draw.line(
             surface, C_BORDER,
             (self._panel_rect.x + 20, div_y),
@@ -166,13 +197,31 @@ class PauseMenu:
         # 4. Buttons
         if self._settings_active:
             lbl = font(14, bold=True).render("RESOLUTION", True, C_ACCENT)
-            surface.blit(lbl, lbl.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + 56)))
+            surface.blit(lbl, lbl.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + _c.scaled(56))))
             cur = font(11).render(
                 f"Current: {_c.WINDOW_WIDTH} × {_c.WINDOW_HEIGHT}", True, C_TEXT_DIM
             )
-            surface.blit(cur, cur.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + 74)))
+            surface.blit(cur, cur.get_rect(center=(self._panel_rect.centerx, self._panel_rect.y + _c.scaled(74))))
             for btn in self._settings_buttons:
                 btn.draw(surface)
+            # Display mode row
+            dm_lbl = font(11, bold=True).render("DISPLAY MODE", True, C_ACCENT)
+            surface.blit(dm_lbl, dm_lbl.get_rect(
+                center=(self._panel_rect.centerx, self._dm_btns[0][0].y - _c.scaled(14))
+            ))
+            from .app import DISPLAY_WINDOWED, DISPLAY_BORDERLESS, DISPLAY_FULLSCREEN
+            cur_mode = getattr(self.app, "_display_mode", DISPLAY_WINDOWED)
+            mouse_pos = pygame.mouse.get_pos()
+            for rect, mode in self._dm_btns:
+                active = (mode == cur_mode)
+                hov    = rect.collidepoint(mouse_pos) and not active
+                bg = C_ACCENT if active else (C_BTN_HOV if hov else C_BTN)
+                pygame.draw.rect(surface, bg, rect, border_radius=4)
+                pygame.draw.rect(surface, C_BORDER, rect, 1, border_radius=4)
+                m_lbl = font(_c.scaled(11), bold=active).render(
+                    self._dm_labels_map[mode], True, (0, 0, 0) if active else C_BTN_TXT
+                )
+                surface.blit(m_lbl, m_lbl.get_rect(center=rect.center))
         elif self._sub_active:
             for btn in self._sub_buttons:
                 btn.draw(surface)

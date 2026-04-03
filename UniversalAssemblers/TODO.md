@@ -5,5 +5,3 @@
 - enable manual input of unit allocation in tasks
 - enable players to zoom in and out of the system map with scroll wheel
 - reduce the frequency of random events and how damaging they are to player entities
-- bug fix: enable right click for sub views like tech tree
-- bug fix: manual save enablement.
