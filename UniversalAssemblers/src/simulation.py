@@ -991,7 +991,11 @@ class SimulationEngine:
                     completed_ids.append(task.task_id)
 
             for tid in completed_ids:
-                gs.bot_tasks.remove(loc_id, bot_type, tid)
+                task = next((t for t in tasks if t.task_id == tid), None)
+                if task and task.repeat:
+                    task.reset()
+                else:
+                    gs.bot_tasks.remove(loc_id, bot_type, tid)
 
         return events
 
@@ -1069,7 +1073,11 @@ class SimulationEngine:
                     completed.append(task.task_id)
 
             for tid in completed:
-                gs.factory_tasks.remove(loc_id, tid)
+                task = next((t for t in tasks if t.task_id == tid), None)
+                if task and task.repeat:
+                    task.reset()
+                else:
+                    gs.factory_tasks.remove(loc_id, tid)
 
         return events
 
@@ -1143,6 +1151,10 @@ class SimulationEngine:
                     completed.append(task.task_id)
 
             for tid in completed:
-                gs.shipyard_tasks.remove(loc_id, tid)
+                task = next((t for t in tasks if t.task_id == tid), None)
+                if task and task.repeat:
+                    task.reset()
+                else:
+                    gs.shipyard_tasks.remove(loc_id, tid)
 
         return events

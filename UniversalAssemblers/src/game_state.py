@@ -42,6 +42,7 @@ class BotTask:
     allocation:      int   = 10    # 0–100 % of bot time devoted to this task
     task_id:         str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
     target_location: str | None = None  # transport: destination body_id
+    repeat:          bool  = False      # if True, reset and restart on completion
 
     @property
     def complete(self) -> bool:
@@ -52,6 +53,11 @@ class BotTask:
         if self.task_type == "transport":
             return self.progress >= self.target_amount
         return self.built_count >= self.target_amount
+
+    def reset(self) -> None:
+        """Reset progress counters so a repeating task can run again."""
+        self.progress    = 0.0
+        self.built_count = 0
 
 
 class BotTaskList:
@@ -114,6 +120,7 @@ class BotTaskList:
                     "allocation":      t.allocation,
                     "task_id":         t.task_id,
                     "target_location": t.target_location,
+                    "repeat":          t.repeat,
                 }
                 for t in tasks
             ]
@@ -136,6 +143,7 @@ class BotTaskList:
                     allocation=td.get("allocation", 10),
                     task_id=td.get("task_id", _u.uuid4().hex[:8]),
                     target_location=td.get("target_location"),
+                    repeat=td.get("repeat", False),
                 ))
         return btl
 
@@ -152,10 +160,15 @@ class FactoryTask:
     allocation:    int   = 25    # 0–100 % of factory throughput
     produced:      float = 0.0
     task_id:       str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+    repeat:        bool  = False  # if True, reset and restart on completion
 
     @property
     def complete(self) -> bool:
         return self.target_amount > 0 and self.produced >= self.target_amount
+
+    def reset(self) -> None:
+        """Reset progress so a repeating task can run again."""
+        self.produced = 0.0
 
 
 class FactoryTaskList:
@@ -195,7 +208,8 @@ class FactoryTaskList:
         return {
             loc: [
                 {"recipe_id": t.recipe_id, "target_amount": t.target_amount,
-                 "allocation": t.allocation, "produced": t.produced, "task_id": t.task_id}
+                 "allocation": t.allocation, "produced": t.produced, "task_id": t.task_id,
+                 "repeat": t.repeat}
                 for t in tasks
             ]
             for loc, tasks in self._tasks.items()
@@ -213,6 +227,7 @@ class FactoryTaskList:
                     allocation=td.get("allocation", 25),
                     produced=td.get("produced", 0.0),
                     task_id=td.get("task_id", _u.uuid4().hex[:8]),
+                    repeat=td.get("repeat", False),
                 ))
         return ftl
 
@@ -229,10 +244,16 @@ class ShipyardTask:
     built_count:  int   = 0
     progress:     float = 0.0
     task_id:      str   = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+    repeat:       bool  = False  # if True, reset and restart on completion
 
     @property
     def complete(self) -> bool:
         return self.built_count >= self.target_count
+
+    def reset(self) -> None:
+        """Reset progress so a repeating task can run again."""
+        self.built_count = 0
+        self.progress    = 0.0
 
 
 class ShipyardTaskList:
@@ -261,7 +282,8 @@ class ShipyardTaskList:
         return {
             loc: [
                 {"ship_type": t.ship_type, "target_count": t.target_count,
-                 "built_count": t.built_count, "progress": t.progress, "task_id": t.task_id}
+                 "built_count": t.built_count, "progress": t.progress, "task_id": t.task_id,
+                 "repeat": t.repeat}
                 for t in tasks
             ]
             for loc, tasks in self._tasks.items()
@@ -279,6 +301,7 @@ class ShipyardTaskList:
                     built_count=td.get("built_count", 0),
                     progress=td.get("progress", 0.0),
                     task_id=td.get("task_id", _u.uuid4().hex[:8]),
+                    repeat=td.get("repeat", False),
                 ))
         return stl
 

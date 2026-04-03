@@ -23,11 +23,10 @@ Categories:
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    NAV_W, MAP_W, TOP_H, TASKBAR_H, HEADER_H, ROW_H, PADDING,
     C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SELECTED, C_HOVER, C_WARN, C_SEP, C_BTN, C_BTN_HOV, C_BTN_TXT,
-    font,
 )
 from .widgets import draw_panel, draw_separator, Button, ScrollableList
 
@@ -131,13 +130,14 @@ class EntityView:
         self._system_id:   str | None = None
         self._body_id:     str | None = None
 
-        self._rect = pygame.Rect(NAV_W, TASKBAR_H, MAP_W, TOP_H)
+        self._rect = pygame.Rect(_c.NAV_W, _c.TASKBAR_H, _c.MAP_W, _c.TOP_H)
 
         self._close_btn = Button(
-            (self._rect.right - 90, self._rect.y + 4, 82, HEADER_H - 6),
+            (self._rect.right - _c.scaled(90), self._rect.y + 4,
+             _c.scaled(82), _c.HEADER_H - 6),
             "✕  CLOSE",
             callback=self._close,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
 
         # --- Bot task UI state ---
@@ -145,6 +145,7 @@ class EntityView:
         self._add_task_type:   str        = "mine"  # "mine" | "build"
         self._add_task_res:    str        = "minerals"
         self._add_task_amount: int        = 100
+        self._add_task_repeat: bool       = False   # True = restart task on completion
         self._bot_scroll:    int = 0
         self._struct_scroll: int = 0
         self._ship_scroll:   int = 0
@@ -162,18 +163,18 @@ class EntityView:
 
         # Scrollable lists for system and body selectors
         sys_sel_rect = pygame.Rect(
-            self._rect.x + PADDING,
-            self._rect.y + HEADER_H + 160,
-            self._rect.width - PADDING * 2,
-            180,
+            self._rect.x + _c.PADDING,
+            self._rect.y + _c.HEADER_H + _c.scaled(160),
+            self._rect.width - _c.PADDING * 2,
+            _c.scaled(180),
         )
         self._sys_list = ScrollableList(sys_sel_rect, "Select Destination System",
                                         on_select=self._on_send_system_select)
         body_sel_rect = pygame.Rect(
-            self._rect.x + PADDING,
-            self._rect.y + HEADER_H + 160,
-            self._rect.width - PADDING * 2,
-            140,
+            self._rect.x + _c.PADDING,
+            self._rect.y + _c.HEADER_H + _c.scaled(160),
+            self._rect.width - _c.PADDING * 2,
+            _c.scaled(140),
         )
         self._body_list = ScrollableList(body_sel_rect, "Select Docking Body",
                                          on_select=self._on_send_body_select)
@@ -193,8 +194,9 @@ class EntityView:
         self._type_value  = type_value
         self._system_id   = system_id
         self._body_id     = body_id
-        self._add_task_mode  = False
-        self._bot_scroll     = 0
+        self._add_task_mode   = False
+        self._add_task_repeat = False
+        self._bot_scroll      = 0
         self._struct_scroll  = 0
         self._ship_scroll    = 0
         # Default task type based on bot capabilities
@@ -414,9 +416,9 @@ class EntityView:
                     max_scroll = max(0, task_count - visible)
                     self._bot_scroll = max(0, min(max_scroll, self._bot_scroll - event.y))
                 elif self._category == "structure":
-                    self._struct_scroll = max(0, self._struct_scroll - event.y * ROW_H)
+                    self._struct_scroll = max(0, self._struct_scroll - event.y * _c.ROW_H)
                 elif self._category == "ship":
-                    self._ship_scroll = max(0, self._ship_scroll - event.y * ROW_H)
+                    self._ship_scroll = max(0, self._ship_scroll - event.y * _c.ROW_H)
 
             if self._category == "bot":
                 self._handle_bot_events(event)
@@ -454,6 +456,8 @@ class EntityView:
                     gs.factory_tasks.remove(loc, task_id)
                 elif action == "toggle_factory_form":
                     self._add_task_mode = not self._add_task_mode
+                elif action == "toggle_repeat":
+                    self._add_task_repeat = not self._add_task_repeat
                 elif action == "set_res":
                     self._add_task_res = str(data)
                 elif action == "dec_amount":
@@ -469,8 +473,10 @@ class EntityView:
                         recipe_id=recipe,
                         target_amount=float(self._add_task_amount) if self._add_task_amount > 0 else 0.0,
                         allocation=25,
+                        repeat=self._add_task_repeat,
                     ))
-                    self._add_task_mode = False
+                    self._add_task_mode   = False
+                    self._add_task_repeat = False
                 elif action == "toggle_shipyard_form":
                     self._add_task_mode = not self._add_task_mode
                 elif action == "confirm_shipyard_task":
@@ -482,8 +488,10 @@ class EntityView:
                     gs.shipyard_tasks.add(loc_id, ShipyardTask(
                         ship_type=ship,
                         target_count=count,
+                        repeat=self._add_task_repeat,
                     ))
-                    self._add_task_mode = False
+                    self._add_task_mode   = False
+                    self._add_task_repeat = False
                 elif action == "shipyard_remove":
                     task_id, loc = data
                     gs.shipyard_tasks.remove(loc, task_id)
@@ -516,6 +524,9 @@ class EntityView:
         if action == "toggle_add_task":
             self._add_task_mode = not self._add_task_mode
 
+        elif action == "toggle_repeat":
+            self._add_task_repeat = not self._add_task_repeat
+
         elif action == "set_task_type":
             allowed = _BOT_ALLOWED_TASKS.get(self._type_value, ["mine"])
             if str(data) in allowed:
@@ -547,6 +558,7 @@ class EntityView:
                     resource=self._add_task_res,
                     entity_type=None,
                     target_amount=self._add_task_amount,
+                    repeat=self._add_task_repeat,
                 )
             elif self._add_task_type == "transport":
                 task = BotTask(
@@ -555,6 +567,7 @@ class EntityView:
                     entity_type=None,
                     target_amount=self._add_task_amount,
                     target_location=self._transport_target_body,
+                    repeat=self._add_task_repeat,
                 )
             elif self._add_task_type == "repair":
                 # Step 3: enforce shipyard presence for ship repair at assignment time
@@ -577,9 +590,11 @@ class EntityView:
                     resource=None,
                     entity_type=self._add_task_res,
                     target_amount=max(1, self._add_task_amount // 100),
+                    repeat=self._add_task_repeat,
                 )
             gs.bot_tasks.add(loc, self._type_value, task)
-            self._add_task_mode = False
+            self._add_task_mode   = False
+            self._add_task_repeat = False
             self._transport_target_body = None
 
         elif action == "remove_task":
@@ -699,14 +714,14 @@ class EntityView:
         content = draw_panel(surface, self._rect, None)
 
         # Title bar
-        hdr = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, HEADER_H)
+        hdr = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, _c.HEADER_H)
         pygame.draw.rect(surface, C_HEADER, hdr)
         name = self._entity_name()
         count = self._count_at_location()
-        title_surf = font(13, bold=True).render(
+        title_surf = _c.font_scaled(13, bold=True).render(
             f"{name.upper()}  ×{count}", True, C_ACCENT
         )
-        title_x = self._rect.x + PADDING
+        title_x = self._rect.x + _c.PADDING
         surface.blit(title_surf, (title_x, self._rect.y + 6))
         # Damage indicator: show [XX% dmg] if entity is damaged
         gs = self.app.game_state
@@ -716,21 +731,21 @@ class EntityView:
             if hf < 1.0:
                 dmg_pct = int((1.0 - hf) * 100)
                 dmg_col = (255, 80, 80) if hf <= 0.5 else (255, 160, 40)
-                dmg_surf = font(11).render(f"[{dmg_pct}% dmg]", True, dmg_col)
+                dmg_surf = _c.font_scaled(11).render(f"[{dmg_pct}% dmg]", True, dmg_col)
                 surface.blit(dmg_surf, (title_x + title_surf.get_width() + 8, self._rect.y + 8))
         self._close_btn.draw(surface)
 
-        draw_separator(surface, self._rect.x + PADDING, self._rect.y + HEADER_H,
-                       self._rect.right - PADDING)
+        draw_separator(surface, self._rect.x + _c.PADDING, self._rect.y + _c.HEADER_H,
+                       self._rect.right - _c.PADDING)
 
         # Content
-        cx = self._rect.x + PADDING
-        cy = self._rect.y + HEADER_H + 10
+        cx = self._rect.x + _c.PADDING
+        cy = self._rect.y + _c.HEADER_H + 10
 
         old_clip = surface.get_clip()
         surface.set_clip(pygame.Rect(
-            self._rect.x, self._rect.y + HEADER_H,
-            self._rect.width, self._rect.height - HEADER_H,
+            self._rect.x, self._rect.y + _c.HEADER_H,
+            self._rect.width, self._rect.height - _c.HEADER_H,
         ))
 
         if self._category == "structure":
@@ -756,12 +771,12 @@ class EntityView:
 
         def txt(label: str, value: str, vcol=C_TEXT) -> None:
             nonlocal cy
-            if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                l = font(12).render(label, True, C_TEXT_DIM)
-                v = font(12, bold=True).render(value, True, vcol)
+            if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                l = _c.font_scaled(12).render(label, True, C_TEXT_DIM)
+                v = _c.font_scaled(12, bold=True).render(value, True, vcol)
                 surface.blit(l, (cx, cy))
-                surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
-            cy += ROW_H
+                surface.blit(v, (self._rect.right - v.get_width() - _c.PADDING * 2, cy))
+            cy += _c.ROW_H
 
         gs = self.app.game_state
         loc = self._body_id or self._system_id
@@ -783,7 +798,7 @@ class EntityView:
                 tog_r = pygame.Rect(cx, cy, 110, 24)
                 tog_col = (0, 120, 60) if is_active else (80, 30, 30)
                 pygame.draw.rect(surface, tog_col, tog_r, border_radius=4)
-                tog_lbl = font(11, bold=True).render(
+                tog_lbl = _c.font_scaled(11, bold=True).render(
                     "● ACTIVE" if is_active else "○ INACTIVE", True,
                     (100, 255, 140) if is_active else (200, 80, 80)
                 )
@@ -792,8 +807,8 @@ class EntityView:
             cy += 30
             cy += 4
             if cy >= content_top - 18 and cy < self._rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                lbl = font(11, bold=True).render("POWER PLANT", True, C_ACCENT)
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                lbl = _c.font_scaled(11, bold=True).render("POWER PLANT", True, C_ACCENT)
                 surface.blit(lbl, (cx, cy + 3))
             cy += 18
             count = self._count_at_location()
@@ -808,10 +823,10 @@ class EntityView:
             from ..models.entity import compute_power_modifier
             mod = compute_power_modifier(gs, loc or "", self._type_value) if gs else 1.0
             mod_col = (80, 220, 100) if mod >= 1.0 else (255, 180, 80)
-            if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                mod_s = font(11).render(f"Env modifier: {mod:.2f}×", True, mod_col)
+            if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                mod_s = _c.font_scaled(11).render(f"Env modifier: {mod:.2f}×", True, mod_col)
                 surface.blit(mod_s, (cx, cy))
-            cy += ROW_H
+            cy += _c.ROW_H
 
         # Extractor refine mode toggle
         if self._type_value == "extractor":
@@ -821,7 +836,7 @@ class EntityView:
                 ref_r = pygame.Rect(cx, cy, 140, 24)
                 ref_col = (20, 80, 120) if refine_on else (40, 40, 60)
                 pygame.draw.rect(surface, ref_col, ref_r, border_radius=4)
-                ref_lbl = font(11, bold=True).render(
+                ref_lbl = _c.font_scaled(11, bold=True).render(
                     "⚗ REFINE: ON" if refine_on else "⚗ REFINE: OFF",
                     True, (100, 200, 255) if refine_on else C_TEXT_DIM
                 )
@@ -831,8 +846,8 @@ class EntityView:
             if refine_on:
                 cy += 4
                 if cy >= content_top - 18 and cy < self._rect.bottom:
-                    draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                    lbl = font(11, bold=True).render("REFINE RECIPES (active)", True, C_ACCENT)
+                    draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                    lbl = _c.font_scaled(11, bold=True).render("REFINE RECIPES (active)", True, C_ACCENT)
                     surface.blit(lbl, (cx, cy + 3))
                 cy += 18
                 for out_res, (costs, rate) in REFINE_RECIPES.items():
@@ -844,18 +859,18 @@ class EntityView:
         if self._type_value == "research_array":
             cy += 4
             if cy >= content_top - 18 and cy < self._rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                lbl = font(11, bold=True).render("RESEARCH", True, C_ACCENT)
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                lbl = _c.font_scaled(11, bold=True).render("RESEARCH", True, C_ACCENT)
                 surface.blit(lbl, (cx, cy + 3))
             cy += 18
-            if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                note = font(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
+            if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                note = _c.font_scaled(12).render("Contributes 1 pt/yr to each in-progress tech.", True, C_TEXT_DIM)
                 surface.blit(note, (cx, cy))
-            cy += ROW_H
-            if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                note2 = font(12).render("Use the TECH TREE button above to assign research.", True, C_TEXT_DIM)
+            cy += _c.ROW_H
+            if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                note2 = _c.font_scaled(12).render("Use the TECH TREE button above to assign research.", True, C_TEXT_DIM)
                 surface.blit(note2, (cx, cy))
-            cy += ROW_H
+            cy += _c.ROW_H
 
         # Factory production queue
         if self._type_value == "factory" and gs:
@@ -863,18 +878,18 @@ class EntityView:
             total_alloc = gs.factory_tasks.total_allocation(loc or "")
             cy += 4
             if cy < self._rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                fh = font(11, bold=True).render("PRODUCTION", True, C_ACCENT)
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                fh = _c.font_scaled(11, bold=True).render("PRODUCTION", True, C_ACCENT)
                 surface.blit(fh, (cx, cy + 3))
             cy += 18
-            alloc_s = font(11).render(f"Capacity used: {total_alloc}%", True, C_TEXT_DIM)
+            alloc_s = _c.font_scaled(11).render(f"Capacity used: {total_alloc}%", True, C_TEXT_DIM)
             if cy < self._rect.bottom:
                 surface.blit(alloc_s, (cx, cy))
             cy += 14
             for task in tasks:
                 if cy + 40 > self._rect.bottom - 60:
                     break
-                tr = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 38)
+                tr = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3, 38)
                 pygame.draw.rect(surface, (18, 30, 60), tr, border_radius=3)
                 pygame.draw.rect(surface, C_BORDER, tr, width=1, border_radius=3)
                 desc = task.recipe_id.replace("_", " ").title()
@@ -884,8 +899,8 @@ class EntityView:
                 else:
                     prog_str = f"{task.produced:.0f} (cont.)"
                     prog_frac = 1.0
-                surface.blit(font(12, bold=True).render(desc, True, C_TEXT), (cx + 6, cy + 4))
-                surface.blit(font(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
+                surface.blit(_c.font_scaled(12, bold=True).render(desc, True, C_TEXT), (cx + 6, cy + 4))
+                surface.blit(_c.font_scaled(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
                 pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(cx + 6, cy + 32, 180, 4))
                 if prog_frac > 0:
                     pygame.draw.rect(surface, (80, 200, 255), pygame.Rect(cx + 6, cy + 32, int(180 * prog_frac), 4))
@@ -893,24 +908,24 @@ class EntityView:
                 ax = tr.right - 110
                 dec_r = pygame.Rect(ax, cy + 8, 22, 22)
                 inc_r = pygame.Rect(ax + 50, cy + 8, 22, 22)
-                alloc_s2 = font(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                alloc_s2 = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
                 pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
                 pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
-                surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 5, dec_r.y + 2))
-                surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 5, inc_r.y + 2))
+                surface.blit(_c.font_scaled(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 5, dec_r.y + 2))
+                surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 5, inc_r.y + 2))
                 surface.blit(alloc_s2, (ax + 26, cy + 10))
                 self._hit_rects.append((dec_r, "factory_alloc_dec", (task.task_id, loc or "")))
                 self._hit_rects.append((inc_r, "factory_alloc_inc", (task.task_id, loc or "")))
                 rm_r = pygame.Rect(tr.right - 26, cy + 8, 22, 22)
                 pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
-                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
+                surface.blit(_c.font_scaled(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
                 self._hit_rects.append((rm_r, "factory_remove", (task.task_id, loc or "")))
                 cy += 44
             # Add recipe button
             add_r = pygame.Rect(cx, cy + 4, 140, 26)
             pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN, add_r, border_radius=4)
             btn_txt = "▼  ADD RECIPE" if not self._add_task_mode else "▲  CANCEL"
-            btn_surf = font(12, bold=True).render(btn_txt, True, C_BTN_TXT)
+            btn_surf = _c.font_scaled(12, bold=True).render(btn_txt, True, C_BTN_TXT)
             surface.blit(btn_surf, btn_surf.get_rect(center=add_r.center))
             self._hit_rects.append((add_r, "toggle_factory_form", loc or ""))
             cy += 36
@@ -922,8 +937,8 @@ class EntityView:
             # Fuel Depot section
             cy += 4
             if cy < self._rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                fd_lbl = font(11, bold=True).render("FUEL DEPOT", True, (255, 200, 80))
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                fd_lbl = _c.font_scaled(11, bold=True).render("FUEL DEPOT", True, (255, 200, 80))
                 surface.blit(fd_lbl, (cx, cy + 3))
             cy += 18
             # Show available fuel_cells at this body
@@ -936,7 +951,7 @@ class EntityView:
                         for moon in body.moons:
                             if moon.id == loc:
                                 fuel_avail = moon.resources.fuel_cells
-            fa_s = font(11).render(f"Available: {fuel_avail:.1f} fuel_cells", True, C_TEXT)
+            fa_s = _c.font_scaled(11).render(f"Available: {fuel_avail:.1f} fuel_cells", True, C_TEXT)
             if cy < self._rect.bottom:
                 surface.blit(fa_s, (cx, cy))
             cy += 16
@@ -944,7 +959,7 @@ class EntityView:
             for stype, fcost in SHIP_FUEL_COSTS.items():
                 if cy >= self._rect.bottom:
                     break
-                fc_row = font(10).render(
+                fc_row = _c.font_scaled(10).render(
                     f"  {stype.replace('_',' ').title()}: {fcost:.0f} fuel_cells",
                     True, C_TEXT_DIM
                 )
@@ -955,29 +970,29 @@ class EntityView:
             tasks = gs.shipyard_tasks.get(loc or "")
             cy += 4
             if cy < self._rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                sh_lbl = font(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                sh_lbl = _c.font_scaled(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
                 surface.blit(sh_lbl, (cx, cy + 3))
             cy += 18
             for task in tasks:
                 if cy + 38 > self._rect.bottom - 60:
                     break
-                tr = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 36)
+                tr = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3, 36)
                 pygame.draw.rect(surface, (18, 30, 60), tr, border_radius=3)
                 pygame.draw.rect(surface, C_BORDER, tr, width=1, border_radius=3)
                 name = task.ship_type.replace("_", " ").title()
-                surface.blit(font(12, bold=True).render(name, True, C_TEXT), (cx + 6, cy + 4))
+                surface.blit(_c.font_scaled(12, bold=True).render(name, True, C_TEXT), (cx + 6, cy + 4))
                 prog_str = f"{task.built_count}/{task.target_count}  (+{task.progress:.0%})"
-                surface.blit(font(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
+                surface.blit(_c.font_scaled(11).render(prog_str, True, C_TEXT_DIM), (cx + 6, cy + 22))
                 rm_r = pygame.Rect(tr.right - 26, cy + 7, 22, 22)
                 pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
-                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
+                surface.blit(_c.font_scaled(12, bold=True).render("✕", True, (255, 100, 100)), (rm_r.x + 4, rm_r.y + 2))
                 self._hit_rects.append((rm_r, "shipyard_remove", (task.task_id, loc or "")))
                 cy += 40
             # Add ship button
             add_r = pygame.Rect(cx, cy + 4, 140, 26)
             pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN, add_r, border_radius=4)
-            btn_lbl_s = font(12, bold=True).render(
+            btn_lbl_s = _c.font_scaled(12, bold=True).render(
                 "▼  BUILD SHIP" if not self._add_task_mode else "▲  CANCEL", True, C_BTN_TXT
             )
             surface.blit(btn_lbl_s, btn_lbl_s.get_rect(center=add_r.center))
@@ -996,8 +1011,8 @@ class EntityView:
             if queue_tasks:
                 cy += 4
                 if cy >= content_top - 18 and cy < self._rect.bottom:
-                    draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-                    q_lbl = font(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
+                    draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+                    q_lbl = _c.font_scaled(11, bold=True).render("BUILD QUEUE", True, C_ACCENT)
                     surface.blit(q_lbl, (cx, cy + 3))
                 cy += 18
                 for qt in queue_tasks:
@@ -1023,8 +1038,8 @@ class EntityView:
         if not gs.tech.is_researched("advanced_manufacturing"):
             recipes = [r for r in recipes if r != "components"]
 
-        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3,
-                             26 + len(recipes) * 26 + 62)
+        form_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3,
+                             26 + len(recipes) * 26 + 90)
         pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
         pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
         fy = cy + 8
@@ -1039,7 +1054,7 @@ class EntityView:
             cost_parts = " + ".join(f"{v:.0f} {k.replace('_',' ')}" for k, v in inputs.items())
             label = f"{rid.replace('_',' ').title()}  ({rate:.0f}/factory/yr)  <- {cost_parts}"
             surface.blit(
-                font(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
+                _c.font_scaled(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
                 (rr.x + 4, rr.y + 4),
             )
             self._hit_rects.append((rr, "set_res", rid))
@@ -1050,18 +1065,30 @@ class EntityView:
         inc_r = pygame.Rect(fx + 90, fy, 26, 22)
         pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
         pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
-        surface.blit(font(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
-        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
-        amt_lbl = font(12, bold=True).render(str(self._add_task_amount), True, C_SELECTED)
+        surface.blit(_c.font_scaled(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        amt_lbl = _c.font_scaled(12, bold=True).render(str(self._add_task_amount), True, C_SELECTED)
         surface.blit(amt_lbl, (fx + 34, fy + 3))
-        surface.blit(font(11).render("units (0=unlimited)", True, C_TEXT_DIM), (fx + 120, fy + 4))
+        surface.blit(_c.font_scaled(11).render("units (0=unlimited)", True, C_TEXT_DIM), (fx + 120, fy + 4))
         self._hit_rects.append((dec_r, "dec_amount", None))
         self._hit_rects.append((inc_r, "inc_amount", None))
         fy += 30
 
+        # Repeat toggle
+        rep_r   = pygame.Rect(fx, fy, 130, 22)
+        rep_col = (20, 100, 60) if self._add_task_repeat else C_BTN
+        rep_lbl = "inf REPEAT: ON" if self._add_task_repeat else "inf REPEAT: OFF"
+        pygame.draw.rect(surface, rep_col, rep_r, border_radius=3)
+        rep_s = _c.font_scaled(10, bold=True).render(
+            rep_lbl, True, (150, 255, 180) if self._add_task_repeat else C_BTN_TXT
+        )
+        surface.blit(rep_s, rep_s.get_rect(center=rep_r.center))
+        self._hit_rects.append((rep_r, "toggle_repeat", None))
+        fy += 28
+
         conf_r = pygame.Rect(fx, fy, 110, 24)
         pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
-        conf_s = font(12, bold=True).render("ASSIGN", True, (200, 255, 220))
+        conf_s = _c.font_scaled(12, bold=True).render("ASSIGN", True, (200, 255, 220))
         surface.blit(conf_s, conf_s.get_rect(center=conf_r.center))
         self._hit_rects.append((conf_r, "confirm_factory_task", loc))
 
@@ -1078,8 +1105,8 @@ class EntityView:
         if not gs.tech.is_researched("atomic_warships"):
             ships = [s for s in ships if s != "warship"]
 
-        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3,
-                             26 + len(ships) * 26 + 62)
+        form_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3,
+                             26 + len(ships) * 26 + 90)
         pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
         pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
         fy = cy + 8
@@ -1094,7 +1121,7 @@ class EntityView:
             cost_str = " + ".join(f"{v:.0f} {k.replace('_',' ')}" for k, v in cost.items())
             label = f"{stype.replace('_',' ').title()}  ({build_t:.1f} yr/ship)  <- {cost_str}"
             surface.blit(
-                font(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
+                _c.font_scaled(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT),
                 (sr.x + 4, sr.y + 4),
             )
             self._hit_rects.append((sr, "set_res", stype))
@@ -1104,18 +1131,30 @@ class EntityView:
         inc_r = pygame.Rect(fx + 90, fy, 26, 22)
         pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
         pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
-        surface.blit(font(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
-        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        surface.blit(_c.font_scaled(13, bold=True).render("-", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
         count = max(1, self._add_task_amount // 100)
-        surface.blit(font(12, bold=True).render(str(count), True, C_SELECTED), (fx + 34, fy + 3))
-        surface.blit(font(11).render("ships to build", True, C_TEXT_DIM), (fx + 120, fy + 4))
+        surface.blit(_c.font_scaled(12, bold=True).render(str(count), True, C_SELECTED), (fx + 34, fy + 3))
+        surface.blit(_c.font_scaled(11).render("ships to build", True, C_TEXT_DIM), (fx + 120, fy + 4))
         self._hit_rects.append((dec_r, "dec_amount", None))
         self._hit_rects.append((inc_r, "inc_amount", None))
         fy += 30
 
+        # Repeat toggle
+        rep_r   = pygame.Rect(fx, fy, 130, 22)
+        rep_col = (20, 100, 60) if self._add_task_repeat else C_BTN
+        rep_lbl = "inf REPEAT: ON" if self._add_task_repeat else "inf REPEAT: OFF"
+        pygame.draw.rect(surface, rep_col, rep_r, border_radius=3)
+        rep_s = _c.font_scaled(10, bold=True).render(
+            rep_lbl, True, (150, 255, 180) if self._add_task_repeat else C_BTN_TXT
+        )
+        surface.blit(rep_s, rep_s.get_rect(center=rep_r.center))
+        self._hit_rects.append((rep_r, "toggle_repeat", None))
+        fy += 28
+
         conf_r = pygame.Rect(fx, fy, 110, 24)
         pygame.draw.rect(surface, (0, 80, 160), conf_r, border_radius=4)
-        conf_s = font(12, bold=True).render("QUEUE BUILD", True, (200, 230, 255))
+        conf_s = _c.font_scaled(12, bold=True).render("QUEUE BUILD", True, (200, 230, 255))
         surface.blit(conf_s, conf_s.get_rect(center=conf_r.center))
         self._hit_rects.append((conf_r, "confirm_shipyard_task", loc))
 
@@ -1134,10 +1173,10 @@ class EntityView:
         total_alloc = gs.bot_tasks.total_allocation(loc, self._type_value)
 
         # Total allocation label + bar (drawn within the visible clip area)
-        alloc_lbl = font(11).render(f"Total allocation: {total_alloc}%", True, C_TEXT_DIM)
+        alloc_lbl = _c.font_scaled(11).render(f"Total allocation: {total_alloc}%", True, C_TEXT_DIM)
         surface.blit(alloc_lbl, (cx, cy))
         cy += 14
-        bar_w = self._rect.width - PADDING * 4
+        bar_w = self._rect.width - _c.PADDING * 4
         bar_r = pygame.Rect(cx, cy, bar_w, 10)
         pygame.draw.rect(surface, (30, 50, 80), bar_r, border_radius=3)
         fill_w = int(bar_w * total_alloc / 100)
@@ -1148,8 +1187,8 @@ class EntityView:
 
         # Task rows
         if tasks:
-            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-            th = font(11, bold=True).render("TASKS", True, C_ACCENT)
+            draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+            th = _c.font_scaled(11, bold=True).render("TASKS", True, C_ACCENT)
             surface.blit(th, (cx, cy + 3))
             cy += 18
 
@@ -1161,7 +1200,7 @@ class EntityView:
 
             # Scrollbar
             if total_tasks > visible_tasks:
-                sb_x = self._rect.right - PADDING - 4
+                sb_x = self._rect.right - _c.PADDING - 4
                 sb_h = visible_tasks * 46
                 sb_y = cy
                 thumb_h = max(16, int(sb_h * visible_tasks / total_tasks))
@@ -1172,7 +1211,7 @@ class EntityView:
                                  pygame.Rect(sb_x, thumb_y, 4, thumb_h), border_radius=2)
 
             for task in visible:
-                task_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 40)
+                task_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3, 40)
                 pygame.draw.rect(surface, (18, 30, 60), task_r, border_radius=3)
                 pygame.draw.rect(surface, C_BORDER, task_r, width=1, border_radius=3)
 
@@ -1204,8 +1243,8 @@ class EntityView:
                     progress_frac = min(1.0, task.built_count / max(1, task.target_amount))
                     prog_str = f"{task.built_count} / {task.target_amount}"
 
-                desc_s = font(12, bold=True).render(desc.upper(), True, C_TEXT)
-                prog_s = font(11).render(prog_str, True, C_TEXT_DIM)
+                desc_s = _c.font_scaled(12, bold=True).render(desc.upper(), True, C_TEXT)
+                prog_s = _c.font_scaled(11).render(prog_str, True, C_TEXT_DIM)
                 surface.blit(desc_s, (cx + 6, cy + 4))
                 surface.blit(prog_s, (cx + 6, cy + 22))
 
@@ -1221,16 +1260,16 @@ class EntityView:
 
                 # Allocation controls
                 alloc_x = task_r.right - 120
-                alloc_s = font(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                alloc_s = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
                 surface.blit(alloc_s, (alloc_x + 24, cy + 10))
 
                 dec_r = pygame.Rect(alloc_x, cy + 8, 22, 22)
                 inc_r = pygame.Rect(alloc_x + 56, cy + 8, 22, 22)
                 pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
                 pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
-                surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT),
+                surface.blit(_c.font_scaled(13, bold=True).render("−", True, C_BTN_TXT),
                              (dec_r.x + 5, dec_r.y + 2))
-                surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT),
+                surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT),
                              (inc_r.x + 5, inc_r.y + 2))
                 self._hit_rects.append((dec_r, "alloc_dec", (task.task_id, task)))
                 self._hit_rects.append((inc_r, "alloc_inc", (task.task_id, task)))
@@ -1238,21 +1277,21 @@ class EntityView:
                 # Remove button
                 rm_r = pygame.Rect(task_r.right - 26, cy + 8, 22, 22)
                 pygame.draw.rect(surface, (80, 20, 20), rm_r, border_radius=3)
-                surface.blit(font(12, bold=True).render("✕", True, (255, 100, 100)),
+                surface.blit(_c.font_scaled(12, bold=True).render("✕", True, (255, 100, 100)),
                              (rm_r.x + 4, rm_r.y + 2))
                 self._hit_rects.append((rm_r, "remove_task", task.task_id))
 
                 cy += 46
         else:
-            no_tasks = font(12).render("No tasks assigned.", True, C_TEXT_DIM)
+            no_tasks = _c.font_scaled(12).render("No tasks assigned.", True, C_TEXT_DIM)
             surface.blit(no_tasks, (cx, cy + 8))
-            cy += ROW_H + 8
+            cy += _c.ROW_H + 8
 
         # + Add task button
         add_btn_r = pygame.Rect(cx, cy + 4, 130, 26)
         pygame.draw.rect(surface, C_BTN_HOV if self._add_task_mode else C_BTN,
                          add_btn_r, border_radius=4)
-        add_lbl = font(12, bold=True).render(
+        add_lbl = _c.font_scaled(12, bold=True).render(
             "▼  ADD TASK" if not self._add_task_mode else "▲  CANCEL",
             True, C_BTN_TXT
         )
@@ -1293,9 +1332,10 @@ class EntityView:
         form_h += 30       # amount row
         if self._add_task_type == "build":
             form_h += 20   # cost line
+        form_h += 28       # repeat toggle
         form_h += 34       # confirm button + padding
 
-        form_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, form_h)
+        form_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3, form_h)
         pygame.draw.rect(surface, (15, 25, 50), form_r, border_radius=4)
         pygame.draw.rect(surface, C_BORDER, form_r, width=1, border_radius=4)
 
@@ -1311,7 +1351,7 @@ class EntityView:
                 tr = pygame.Rect(fx + i * 90, fy, 82, 22)
                 sel = self._add_task_type == ttype
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tr, border_radius=3)
-                lbl = font(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT)
+                lbl = _c.font_scaled(11, bold=True).render(tlabel, True, (0, 0, 0) if sel else C_BTN_TXT)
                 surface.blit(lbl, lbl.get_rect(center=tr.center))
                 self._hit_rects.append((tr, "set_task_type", ttype))
             fy += 30
@@ -1323,7 +1363,7 @@ class EntityView:
                 cr = pygame.Rect(fx + i * 90, fy, 82, 22)
                 sel = self._add_task_res == cat
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, cr, border_radius=3)
-                clbl = font(11, bold=True).render(cat_label, True, (0, 0, 0) if sel else C_BTN_TXT)
+                clbl = _c.font_scaled(11, bold=True).render(cat_label, True, (0, 0, 0) if sel else C_BTN_TXT)
                 surface.blit(clbl, clbl.get_rect(center=cr.center))
                 self._hit_rects.append((cr, "set_res", cat))
             fy += 28
@@ -1344,7 +1384,7 @@ class EntityView:
             else:
                 note_txt = "Requires shipyard at location (ship repair)"
                 note_col = (120, 120, 140)
-            note_s = font(10).render(note_txt, True, note_col)
+            note_s = _c.font_scaled(10).render(note_txt, True, note_col)
             surface.blit(note_s, (fx, fy))
             fy += 18
             # Confirm button — dimmed and non-clickable when shipyard required but absent
@@ -1353,7 +1393,7 @@ class EntityView:
             btn_col = (60, 60, 60) if confirm_disabled else (0, 120, 80)
             lbl_col = (120, 120, 120) if confirm_disabled else (200, 255, 220)
             pygame.draw.rect(surface, btn_col, conf_r, border_radius=4)
-            conf_lbl = font(12, bold=True).render("CONFIRM", True, lbl_col)
+            conf_lbl = _c.font_scaled(12, bold=True).render("CONFIRM", True, lbl_col)
             surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
             if not confirm_disabled:
                 self._hit_rects.append((conf_r, "confirm_add_task", None))
@@ -1365,7 +1405,7 @@ class EntityView:
                 rr = pygame.Rect(fx + (i % 3) * 90, fy + (i // 3) * 26, 82, 22)
                 sel = self._add_task_res == res
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, rr, border_radius=3)
-                rlbl = font(10, bold=True).render(
+                rlbl = _c.font_scaled(10, bold=True).render(
                     _MINE_RES_LABELS[res], True, (0, 0, 0) if sel else C_BTN_TXT
                 )
                 surface.blit(rlbl, rlbl.get_rect(center=rr.center))
@@ -1374,7 +1414,7 @@ class EntityView:
 
             # For transport: show destination body selector
             if self._add_task_type == "transport":
-                dest_lbl = font(11, bold=True).render("Destination:", True, C_TEXT_DIM)
+                dest_lbl = _c.font_scaled(11, bold=True).render("Destination:", True, C_TEXT_DIM)
                 surface.blit(dest_lbl, (fx, fy))
                 fy += 18
                 # Get bodies in current system, excluding current location
@@ -1392,7 +1432,7 @@ class EntityView:
                     br = pygame.Rect(fx + (i % 2) * 140, fy + (i // 2) * 24, 132, 20)
                     sel = self._transport_target_body == bid
                     pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, br, border_radius=3)
-                    blbl = font(9, bold=True).render(
+                    blbl = _c.font_scaled(9, bold=True).render(
                         bname[:16], True, (0, 0, 0) if sel else C_BTN_TXT
                     )
                     surface.blit(blbl, blbl.get_rect(center=br.center))
@@ -1407,7 +1447,7 @@ class EntityView:
                 er = pygame.Rect(fx + (i % 3) * 95, fy + (i // 3) * 26, 88, 22)
                 sel = self._add_task_res == etype
                 pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, er, border_radius=3)
-                elbl = font(9, bold=True).render(
+                elbl = _c.font_scaled(9, bold=True).render(
                     etype.replace("_", " ").title(), True, (0, 0, 0) if sel else C_BTN_TXT
                 )
                 surface.blit(elbl, elbl.get_rect(center=er.center))
@@ -1419,13 +1459,13 @@ class EntityView:
         inc_r = pygame.Rect(fx + 90, fy, 26, 22)
         pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
         pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
-        surface.blit(font(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
-        surface.blit(font(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
+        surface.blit(_c.font_scaled(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 7, dec_r.y + 2))
+        surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 7, inc_r.y + 2))
         target = self._add_task_amount if self._add_task_type in ("mine", "transport") else max(1, self._add_task_amount // 100)
-        amt_s = font(12, bold=True).render(str(target), True, C_SELECTED)
+        amt_s = _c.font_scaled(12, bold=True).render(str(target), True, C_SELECTED)
         surface.blit(amt_s, (fx + 34, fy + 3))
         unit_lbl = "units" if self._add_task_type in ("mine", "transport") else "units to build"
-        amt_lbl = font(11).render(unit_lbl, True, C_TEXT_DIM)
+        amt_lbl = _c.font_scaled(11).render(unit_lbl, True, C_TEXT_DIM)
         surface.blit(amt_lbl, (fx + 120, fy + 4))
         self._hit_rects.append((dec_r, "dec_amount", None))
         self._hit_rects.append((inc_r, "inc_amount", None))
@@ -1439,14 +1479,26 @@ class EntityView:
                 cost_str = "Cost/unit: " + " + ".join(cost_parts)
             else:
                 cost_str = "Cost/unit: free"
-            cost_surf = font(10).render(cost_str, True, C_WARN)
+            cost_surf = _c.font_scaled(10).render(cost_str, True, C_WARN)
             surface.blit(cost_surf, (fx, fy))
             fy += 18
+
+        # Repeat toggle
+        rep_r   = pygame.Rect(fx, fy, 130, 22)
+        rep_col = (20, 100, 60) if self._add_task_repeat else C_BTN
+        rep_lbl = "inf REPEAT: ON" if self._add_task_repeat else "inf REPEAT: OFF"
+        pygame.draw.rect(surface, rep_col, rep_r, border_radius=3)
+        rep_s = _c.font_scaled(10, bold=True).render(
+            rep_lbl, True, (150, 255, 180) if self._add_task_repeat else C_BTN_TXT
+        )
+        surface.blit(rep_s, rep_s.get_rect(center=rep_r.center))
+        self._hit_rects.append((rep_r, "toggle_repeat", None))
+        fy += 28
 
         # Confirm button
         conf_r = pygame.Rect(fx, fy, 100, 24)
         pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
-        conf_lbl = font(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+        conf_lbl = _c.font_scaled(12, bold=True).render("CONFIRM", True, (200, 255, 220))
         surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
         self._hit_rects.append((conf_r, "confirm_add_task", None))
 
@@ -1467,12 +1519,12 @@ class EntityView:
 
         def txt(label: str, value: str, vcol=C_TEXT) -> None:
             nonlocal cy
-            if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                l = font(12).render(label, True, C_TEXT_DIM)
-                v = font(12, bold=True).render(value, True, vcol)
+            if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                l = _c.font_scaled(12).render(label, True, C_TEXT_DIM)
+                v = _c.font_scaled(12, bold=True).render(value, True, vcol)
                 surface.blit(l, (cx, cy))
-                surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
-            cy += ROW_H
+                surface.blit(v, (self._rect.right - v.get_width() - _c.PADDING * 2, cy))
+            cy += _c.ROW_H
 
         count = self._count_at_location()
         txt("In system", str(count))
@@ -1492,18 +1544,18 @@ class EntityView:
         role = _SHIP_ROLES.get(self._type_value, "")
         spd  = SHIP_SPEEDS.get(self._type_value, 0.25)
         spd_lbl = _SHIP_SPEED_LABELS.get(self._type_value, f"{spd:.0%}/yr")
-        if cy >= content_top - ROW_H and cy < self._rect.bottom:
-            rs = font(11).render(role, True, C_TEXT_DIM)
+        if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+            rs = _c.font_scaled(11).render(role, True, C_TEXT_DIM)
             surface.blit(rs, (cx, cy))
-        cy += ROW_H - 4
+        cy += _c.ROW_H - 4
         txt("Speed", f"{spd_lbl}  ({spd:.0%}/yr)", C_TEXT_DIM)
 
         # Travel queue
         orders = gs.order_queue.get_all(loc, self._type_value)
         cy += 4
         if cy < self._rect.bottom:
-            draw_separator(surface, cx, cy, self._rect.right - PADDING * 2)
-            qlbl = font(11, bold=True).render("TRAVEL QUEUE", True, C_ACCENT)
+            draw_separator(surface, cx, cy, self._rect.right - _c.PADDING * 2)
+            qlbl = _c.font_scaled(11, bold=True).render("TRAVEL QUEUE", True, C_ACCENT)
             surface.blit(qlbl, (cx, cy + 3))
         cy += 18
 
@@ -1533,14 +1585,14 @@ class EntityView:
                     eta_yr   = eta_frac / max(order.travel_speed, 0.01)
                     prog_str = f"{order.progress:.0%}"
                 row_col = C_ACCENT if i == 0 else C_TEXT_DIM
-                if cy >= content_top - ROW_H and cy < self._rect.bottom:
-                    row_s = font(12).render(
+                if cy >= content_top - _c.ROW_H and cy < self._rect.bottom:
+                    row_s = _c.font_scaled(12).render(
                         f"{'▶' if i == 0 else '◦'}  {dest_str}  —  {prog_str}"
                         f"  (~{eta_yr:.1f}yr)",
                         True, row_col,
                     )
                     surface.blit(row_s, (cx + 6, cy))
-                    pbar_w = min(200, self._rect.width - PADDING * 4 - 30)
+                    pbar_w = min(200, self._rect.width - _c.PADDING * 4 - 30)
                     pygame.draw.rect(surface, (30, 50, 80),
                                      pygame.Rect(cx + 6, cy + 16, pbar_w, 4))
                     pygame.draw.rect(surface, C_ACCENT,
@@ -1552,16 +1604,16 @@ class EntityView:
                         cncl_r = pygame.Rect(cx_btn, cy + 10, 22, 22)
                         pygame.draw.rect(surface, (80, 20, 20), cncl_r, border_radius=3)
                         surface.blit(
-                            font(11, bold=True).render("✕", True, (255, 100, 100)),
+                            _c.font_scaled(11, bold=True).render("✕", True, (255, 100, 100)),
                             (cncl_r.x + 4, cncl_r.y + 3),
                         )
                         self._hit_rects.append((cncl_r, "cancel_order", None))
                 cy += 26
         else:
             if cy < self._rect.bottom:
-                no_ord = font(12).render("No orders queued.", True, C_TEXT_DIM)
+                no_ord = _c.font_scaled(12).render("No orders queued.", True, C_TEXT_DIM)
                 surface.blit(no_ord, (cx, cy))
-            cy += ROW_H
+            cy += _c.ROW_H
 
         # Dispatch panel — available for ALL ship types when ships are present
         if count > 0:
@@ -1570,13 +1622,13 @@ class EntityView:
             from ..models.entity import SHIP_FUEL_COSTS
             fuel_cost = SHIP_FUEL_COSTS.get(self._type_value, 0.0)
             if fuel_cost > 0:
-                fc_s = font(11).render(f"⛽ Cost: {fuel_cost:.0f} fuel_cells per dispatch",
+                fc_s = _c.font_scaled(11).render(f"⛽ Cost: {fuel_cost:.0f} fuel_cells per dispatch",
                                        True, C_TEXT_DIM)
                 surface.blit(fc_s, (cx, cy))
                 cy += 16
             # Fuel warning
             if self._fuel_warning and not self._send_mode:
-                fw_s = font(11, bold=True).render(
+                fw_s = _c.font_scaled(11, bold=True).render(
                     "⚠ Insufficient fuel_cells for dispatch", True, C_WARN
                 )
                 surface.blit(fw_s, (cx, cy))
@@ -1584,7 +1636,7 @@ class EntityView:
             send_btn_r = pygame.Rect(cx, cy, 170, 28)
             pygame.draw.rect(surface, C_BTN_HOV if self._send_mode else C_BTN,
                              send_btn_r, border_radius=4)
-            send_lbl = font(12, bold=True).render(
+            send_lbl = _c.font_scaled(12, bold=True).render(
                 "▼  DISPATCH SHIP" if not self._send_mode else "▲  CANCEL",
                 True, C_BTN_TXT,
             )
@@ -1595,7 +1647,7 @@ class EntityView:
             if self._send_mode:
                 # Step 1 — System selector
                 avail_h = max(80, min(180, self._rect.bottom - cy - 60))
-                self._sys_list.rect = pygame.Rect(cx, cy, self._rect.width - PADDING * 2, avail_h)
+                self._sys_list.rect = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 2, avail_h)
                 self._sys_list.draw(surface)
                 cy += avail_h + 6
 
@@ -1612,13 +1664,13 @@ class EntityView:
                     if cy < self._rect.bottom:
                         hint_col = (180, 220, 160) if self._type_value == "mining_vessel" \
                                    else (180, 200, 255)
-                        hl = font(11, bold=True).render(
+                        hl = _c.font_scaled(11, bold=True).render(
                             f"Select docking body in {dest_name}:", True, hint_col
                         )
                         surface.blit(hl, (cx, cy))
                     cy += 16
                     body_h = max(60, min(140, self._rect.bottom - cy - 40))
-                    self._body_list.rect = pygame.Rect(cx, cy, self._rect.width - PADDING * 2, body_h)
+                    self._body_list.rect = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 2, body_h)
                     self._body_list.draw(surface)
                     cy += body_h + 6
 
@@ -1648,9 +1700,9 @@ class EntityView:
                                             body_name = f" → {moon.name}"
 
                     disp_col = (0, 120, 60) if can_dispatch else (40, 60, 80)
-                    disp_btn_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 3, 28)
+                    disp_btn_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 3, 28)
                     pygame.draw.rect(surface, disp_col, disp_btn_r, border_radius=4)
-                    disp_lbl = font(12, bold=True).render(
+                    disp_lbl = _c.font_scaled(12, bold=True).render(
                         f"DISPATCH → {dest_name}{body_name}",
                         True, (200, 255, 220) if can_dispatch else C_TEXT_DIM,
                     )
@@ -1676,17 +1728,17 @@ class EntityView:
         loc = self._body_id or ""
         pop = gs.bio_state.get(loc) if loc else None
         if not pop:
-            msg = font(12).render("No bio population here.", True, C_TEXT_DIM)
+            msg = _c.font_scaled(12).render("No bio population here.", True, C_TEXT_DIM)
             surface.blit(msg, (cx, cy))
-            return cy + ROW_H
+            return cy + _c.ROW_H
 
         def txt(label: str, value: str, vcol=C_TEXT) -> None:
             nonlocal cy
-            l = font(12).render(label, True, C_TEXT_DIM)
-            v = font(12, bold=True).render(value, True, vcol)
+            l = _c.font_scaled(12).render(label, True, C_TEXT_DIM)
+            v = _c.font_scaled(12, bold=True).render(value, True, vcol)
             surface.blit(l, (cx, cy))
-            surface.blit(v, (self._rect.right - v.get_width() - PADDING * 2, cy))
-            cy += ROW_H
+            surface.blit(v, (self._rect.right - v.get_width() - _c.PADDING * 2, cy))
+            cy += _c.ROW_H
 
         from ..simulation import _BIOS_REGEN_PER_POP
 

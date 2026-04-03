@@ -7,20 +7,12 @@ Right-click or ESC to close.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, TASKBAR_H, HEADER_H, PADDING,
     C_BG, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SEP, C_BTN, C_BTN_TXT,
-    font,
 )
 from .widgets import draw_separator, Button
-
-_SECTION_H   = 28   # section heading row height
-_GROUP_ROW_H = 20   # location / bot-type grouping row height
-_TASK_ROW_H  = 28   # individual task row height
-_FILTER_H    = 24
-_FILTER_W    = 110
-_BAR_W       = 80   # progress bar width
 
 
 class QueueView:
@@ -30,13 +22,21 @@ class QueueView:
         self.app       = app
         self.is_active = False
 
-        self._rect = pygame.Rect(0, TASKBAR_H, WINDOW_WIDTH, WINDOW_HEIGHT - TASKBAR_H)
+        self._section_h   = _c.scaled(28)
+        self._group_row_h = _c.scaled(20)
+        self._task_row_h  = _c.scaled(28)
+        self._filter_h    = _c.scaled(24)
+        self._filter_w    = _c.scaled(110)
+        self._bar_w       = _c.scaled(80)
+
+        self._rect = pygame.Rect(0, _c.TASKBAR_H, _c.WINDOW_WIDTH, _c.WINDOW_HEIGHT - _c.TASKBAR_H)
 
         self._close_btn = Button(
-            (self._rect.right - 100, self._rect.y + 8, 90, 26),
+            (self._rect.right - _c.scaled(100), self._rect.y + _c.scaled(8),
+             _c.scaled(90), _c.scaled(26)),
             "✕  CLOSE",
             callback=self._close,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
 
         self._scroll_y:      int                              = 0
@@ -68,10 +68,10 @@ class QueueView:
             self._close_btn.handle_event(event)
 
             if event.type == pygame.MOUSEWHEEL:
-                visible_h  = self._rect.height - HEADER_H - _FILTER_H - 16
+                visible_h  = self._rect.height - _c.HEADER_H - self._filter_h - 16
                 max_scroll = max(0, self._content_h - visible_h)
                 self._scroll_y = max(0, min(max_scroll,
-                                            self._scroll_y - event.y * _TASK_ROW_H))
+                                            self._scroll_y - event.y * self._task_row_h))
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
@@ -91,16 +91,16 @@ class QueueView:
         pygame.draw.rect(surface, C_BORDER, self._rect, width=1)
 
         # Header bar
-        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, HEADER_H)
+        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, _c.HEADER_H)
         pygame.draw.rect(surface, C_HEADER, hdr_r)
-        hdr_s = font(14, bold=True).render("QUEUE — CONSTRUCTIONS & TASKS", True, C_ACCENT)
-        surface.blit(hdr_s, (self._rect.x + PADDING, self._rect.y + 5))
+        hdr_s = _c.font_scaled(14, bold=True).render("QUEUE — CONSTRUCTIONS & TASKS", True, C_ACCENT)
+        surface.blit(hdr_s, (self._rect.x + _c.PADDING, self._rect.y + 5))
         self._close_btn.draw(surface)
 
         # Filter tabs
         self._filter_btns = []
-        fx = self._rect.x + PADDING
-        fy = self._rect.y + HEADER_H + 4
+        fx = self._rect.x + _c.PADDING
+        fy = self._rect.y + _c.HEADER_H + 4
         tabs: list[tuple[str, str | None]] = [("All", None)]
         gs     = self.app.game_state
         galaxy = self.app.galaxy
@@ -111,20 +111,20 @@ class QueueView:
                                               DiscoveryState.COLONIZED):
                     tabs.append((sys_.name[:12], sys_.id))
         for label, sys_id in tabs:
-            tb_r = pygame.Rect(fx, fy, _FILTER_W, _FILTER_H)
+            tb_r = pygame.Rect(fx, fy, self._filter_w, self._filter_h)
             sel  = self._filter_system == sys_id
             pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tb_r, border_radius=3)
-            tb_s = font(10, bold=True).render(
+            tb_s = _c.font_scaled(10, bold=True).render(
                 label, True, (0, 0, 0) if sel else C_BTN_TXT
             )
             surface.blit(tb_s, tb_s.get_rect(center=tb_r.center))
             self._filter_btns.append((tb_r, sys_id))
-            fx += _FILTER_W + 4
-            if fx + _FILTER_W > self._rect.right - PADDING:
-                fx = self._rect.x + PADDING
-                fy += _FILTER_H + 4
+            fx += self._filter_w + 4
+            if fx + self._filter_w > self._rect.right - _c.PADDING:
+                fx = self._rect.x + _c.PADDING
+                fy += self._filter_h + 4
 
-        content_y_start = self._rect.y + HEADER_H + _FILTER_H + 12
+        content_y_start = self._rect.y + _c.HEADER_H + self._filter_h + 12
         content_rect = pygame.Rect(
             self._rect.x, content_y_start,
             self._rect.width, self._rect.height - (content_y_start - self._rect.y),
@@ -134,7 +134,7 @@ class QueueView:
         surface.set_clip(content_rect)
 
         cy      = content_y_start - self._scroll_y
-        cx      = self._rect.x + PADDING
+        cx      = self._rect.x + _c.PADDING
         total_h = 0
         any_tasks = False
 
@@ -218,7 +218,7 @@ class QueueView:
 
         if not any_tasks:
             msg = "No active tasks for the selected filter."
-            no_s = font(13).render(msg, True, C_TEXT_DIM)
+            no_s = _c.font_scaled(13).render(msg, True, C_TEXT_DIM)
             surface.blit(no_s, no_s.get_rect(center=(self._rect.centerx,
                                                        content_y_start + 60)))
 
@@ -247,10 +247,10 @@ class QueueView:
     def _section_hdr(
         self, surface, cx, cy, total_h, clip_rect, title, color
     ) -> tuple[int, int]:
-        h = _SECTION_H
+        h = self._section_h
         if cy >= clip_rect.y - h and cy < clip_rect.bottom:
-            draw_separator(surface, cx, cy + h - 3, clip_rect.right - PADDING)
-            surface.blit(font(11, bold=True).render(title, True, color), (cx, cy + 5))
+            draw_separator(surface, cx, cy + h - 3, clip_rect.right - _c.PADDING)
+            surface.blit(_c.font_scaled(11, bold=True).render(title, True, color), (cx, cy + 5))
         cy += h
         total_h += h
         return cy, total_h
@@ -258,9 +258,9 @@ class QueueView:
     def _group_hdr(
         self, surface, cx, cy, total_h, clip_rect, label
     ) -> tuple[int, int]:
-        h = _GROUP_ROW_H
+        h = self._group_row_h
         if cy >= clip_rect.y - h and cy < clip_rect.bottom:
-            surface.blit(font(10).render(label, True, C_TEXT_DIM), (cx + 4, cy + 3))
+            surface.blit(_c.font_scaled(10).render(label, True, C_TEXT_DIM), (cx + 4, cy + 3))
         cy += h
         total_h += h
         return cy, total_h
@@ -268,10 +268,10 @@ class QueueView:
     def _bot_row(
         self, surface, cx, cy, total_h, clip_rect, task
     ) -> tuple[int, int]:
-        h = _TASK_ROW_H + 2
-        if cy >= clip_rect.y - _TASK_ROW_H and cy < clip_rect.bottom:
-            row_w = self._rect.width - PADDING * 2 - 8
-            row_r = pygame.Rect(cx + 8, cy, row_w, _TASK_ROW_H)
+        h = self._task_row_h + 2
+        if cy >= clip_rect.y - self._task_row_h and cy < clip_rect.bottom:
+            row_w = self._rect.width - _c.PADDING * 2 - 8
+            row_r = pygame.Rect(cx + 8, cy, row_w, self._task_row_h)
             pygame.draw.rect(surface, (15, 25, 50), row_r, border_radius=2)
 
             if task.task_type == "mine":
@@ -282,9 +282,11 @@ class QueueView:
                 label = f"Transport  {(task.resource or '').replace('_', ' ').title()}"
             else:
                 label = task.task_type.title()
+            if task.repeat:
+                label += "  [R]"
 
             text_col = C_TEXT_DIM if task.complete else C_TEXT
-            surface.blit(font(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
+            surface.blit(_c.font_scaled(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
 
             # Progress bar
             bx = cx + 270
@@ -295,22 +297,22 @@ class QueueView:
                 else:
                     frac    = min(1.0, task.progress / task.target_amount)
                     pg_txt  = f"{int(task.progress)}/{task.target_amount}"
-                pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, _BAR_W, 7))
+                pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, self._bar_w, 7))
                 if frac > 0:
                     pygame.draw.rect(surface, C_ACCENT,
-                                     pygame.Rect(bx, cy + 10, int(_BAR_W * frac), 7))
-                surface.blit(font(9).render(pg_txt, True, C_TEXT_DIM),
-                             (bx + _BAR_W + 4, cy + 9))
+                                     pygame.Rect(bx, cy + 10, int(self._bar_w * frac), 7))
+                surface.blit(_c.font_scaled(9).render(pg_txt, True, C_TEXT_DIM),
+                             (bx + self._bar_w + 4, cy + 9))
 
             # Allocation %
-            alloc_s = font(10).render(f"{task.allocation}%", True, C_ACCENT)
+            alloc_s = _c.font_scaled(10).render(f"{task.allocation}%", True, C_ACCENT)
             surface.blit(alloc_s, (row_r.right - alloc_s.get_width() - 8, cy + 7))
 
             # Status badge
             if task.complete:
-                st_s = font(9, bold=True).render("DONE",   True, (80, 200, 80))
+                st_s = _c.font_scaled(9, bold=True).render("DONE",   True, (80, 200, 80))
             else:
-                st_s = font(9, bold=True).render("ACTIVE", True, (80, 160, 255))
+                st_s = _c.font_scaled(9, bold=True).render("ACTIVE", True, (80, 160, 255))
             surface.blit(st_s, (row_r.right - st_s.get_width() - 52, cy + 7))
 
         cy += h
@@ -320,32 +322,34 @@ class QueueView:
     def _factory_row(
         self, surface, cx, cy, total_h, clip_rect, task
     ) -> tuple[int, int]:
-        h = _TASK_ROW_H + 2
-        if cy >= clip_rect.y - _TASK_ROW_H and cy < clip_rect.bottom:
-            row_w = self._rect.width - PADDING * 2 - 8
-            row_r = pygame.Rect(cx + 8, cy, row_w, _TASK_ROW_H)
+        h = self._task_row_h + 2
+        if cy >= clip_rect.y - self._task_row_h and cy < clip_rect.bottom:
+            row_w = self._rect.width - _c.PADDING * 2 - 8
+            row_r = pygame.Rect(cx + 8, cy, row_w, self._task_row_h)
             pygame.draw.rect(surface, (15, 25, 50), row_r, border_radius=2)
 
-            label    = f"Produce  {task.recipe_id.replace('_', ' ').title()}"
+            label = f"Produce  {task.recipe_id.replace('_', ' ').title()}"
+            if task.repeat:
+                label += "  [R]"
             text_col = C_TEXT_DIM if task.complete else C_TEXT
-            surface.blit(font(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
+            surface.blit(_c.font_scaled(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
 
             bx = cx + 270
             if task.target_amount > 0:
                 frac = min(1.0, task.produced / task.target_amount)
-                pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, _BAR_W, 7))
+                pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, self._bar_w, 7))
                 if frac > 0:
                     pygame.draw.rect(surface, (255, 200, 60),
-                                     pygame.Rect(bx, cy + 10, int(_BAR_W * frac), 7))
+                                     pygame.Rect(bx, cy + 10, int(self._bar_w * frac), 7))
                 surface.blit(
-                    font(9).render(f"{task.produced:.0f}/{task.target_amount:.0f}",
+                    _c.font_scaled(9).render(f"{task.produced:.0f}/{task.target_amount:.0f}",
                                    True, C_TEXT_DIM),
-                    (bx + _BAR_W + 4, cy + 9),
+                    (bx + self._bar_w + 4, cy + 9),
                 )
             else:
-                surface.blit(font(9).render("continuous", True, C_TEXT_DIM), (bx, cy + 10))
+                surface.blit(_c.font_scaled(9).render("continuous", True, C_TEXT_DIM), (bx, cy + 10))
 
-            alloc_s = font(10).render(f"{task.allocation}%", True, (255, 200, 60))
+            alloc_s = _c.font_scaled(10).render(f"{task.allocation}%", True, (255, 200, 60))
             surface.blit(alloc_s, (row_r.right - alloc_s.get_width() - 8, cy + 7))
 
         cy += h
@@ -355,31 +359,33 @@ class QueueView:
     def _shipyard_row(
         self, surface, cx, cy, total_h, clip_rect, task
     ) -> tuple[int, int]:
-        h = _TASK_ROW_H + 2
-        if cy >= clip_rect.y - _TASK_ROW_H and cy < clip_rect.bottom:
-            row_w = self._rect.width - PADDING * 2 - 8
-            row_r = pygame.Rect(cx + 8, cy, row_w, _TASK_ROW_H)
+        h = self._task_row_h + 2
+        if cy >= clip_rect.y - self._task_row_h and cy < clip_rect.bottom:
+            row_w = self._rect.width - _c.PADDING * 2 - 8
+            row_r = pygame.Rect(cx + 8, cy, row_w, self._task_row_h)
             pygame.draw.rect(surface, (15, 25, 50), row_r, border_radius=2)
 
-            label    = f"Build  {task.ship_type.replace('_', ' ').title()}"
+            label = f"Build  {task.ship_type.replace('_', ' ').title()}"
+            if task.repeat:
+                label += "  [R]"
             text_col = C_TEXT_DIM if task.complete else C_TEXT
-            surface.blit(font(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
+            surface.blit(_c.font_scaled(11).render(label, True, text_col), (row_r.x + 6, cy + 7))
 
             bx   = cx + 270
             frac = min(1.0, task.built_count / max(1, task.target_count))
-            pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, _BAR_W, 7))
+            pygame.draw.rect(surface, (30, 50, 80), pygame.Rect(bx, cy + 10, self._bar_w, 7))
             if frac > 0:
                 pygame.draw.rect(surface, (180, 130, 255),
-                                 pygame.Rect(bx, cy + 10, int(_BAR_W * frac), 7))
+                                 pygame.Rect(bx, cy + 10, int(self._bar_w * frac), 7))
             pg_txt = f"{task.built_count}/{task.target_count}"
-            surface.blit(font(9).render(pg_txt, True, C_TEXT_DIM),
-                         (bx + _BAR_W + 4, cy + 9))
+            surface.blit(_c.font_scaled(9).render(pg_txt, True, C_TEXT_DIM),
+                         (bx + self._bar_w + 4, cy + 9))
             # Per-ship build progress fraction
             if task.progress > 0 and not task.complete:
-                pct_s = font(9).render(f"  ({task.progress * 100:.0f}%)",
+                pct_s = _c.font_scaled(9).render(f"  ({task.progress * 100:.0f}%)",
                                        True, (180, 130, 255))
-                pg_w  = font(9).size(pg_txt)[0]
-                surface.blit(pct_s, (bx + _BAR_W + 4 + pg_w, cy + 9))
+                pg_w  = _c.font_scaled(9).size(pg_txt)[0]
+                surface.blit(pct_s, (bx + self._bar_w + 4 + pg_w, cy + 9))
 
         cy += h
         total_h += h
