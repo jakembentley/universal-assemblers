@@ -163,6 +163,8 @@ class MapPanel:
     # Draw
 
     def draw(self, surface: pygame.Surface) -> None:
+        old_clip = surface.get_clip()
+        surface.set_clip(self.rect)
         pygame.draw.rect(surface, C_PANEL, self.rect)
         self._draw_bg_stars(surface)
 
@@ -182,6 +184,7 @@ class MapPanel:
             self._draw_system_view(surface, system)
 
         pygame.draw.rect(surface, (30, 60, 110), self.rect, width=1)
+        surface.set_clip(old_clip)
 
     def _draw_bg_stars(self, surface: pygame.Surface) -> None:
         for x, y, r, b in self._bg_stars:

@@ -11,6 +11,7 @@ from collections import deque
 
 import pygame
 
+from . import constants as _c
 from .constants import WINDOW_WIDTH, WINDOW_HEIGHT, FPS, TITLE
 from .main_menu import MainMenu
 from .game_view import GameView
@@ -31,13 +32,30 @@ from ..models.celestial import Galaxy
 from ..game_state import GameState
 
 
+DISPLAY_WINDOWED   = "windowed"
+DISPLAY_BORDERLESS = "borderless"
+DISPLAY_FULLSCREEN = "fullscreen"
+
+
 class App:
 
     def __init__(self) -> None:
         pygame.init()
         pygame.key.set_repeat(400, 50)  # hold-to-repeat: 400ms delay, 50ms interval
         pygame.display.set_caption(TITLE)
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+
+        # Detect native monitor resolution before creating the display
+        info = pygame.display.Info()
+        self._native_w: int = info.current_w if info.current_w > 0 else 1920
+        self._native_h: int = info.current_h if info.current_h > 0 else 1080
+
+        self._display_mode: str = DISPLAY_WINDOWED
+        _c.set_ui_scale(WINDOW_HEIGHT)
+        _c.WINDOW_WIDTH  = WINDOW_WIDTH
+        _c.WINDOW_HEIGHT = WINDOW_HEIGHT
+        _c.MAP_W = WINDOW_WIDTH - _c.NAV_W
+        _c.MAP_X = _c.NAV_W
+        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.RESIZABLE)
         self.clock  = pygame.time.Clock()
 
         self.state: str = "menu"   # "menu" | "galaxy" | "system"
@@ -354,14 +372,40 @@ class App:
             print(f"[file dialog] {exc}")
             return None
 
-    def change_resolution(self, w: int, h: int) -> None:
+    def change_display_mode(self, mode: str) -> None:
+        """Switch display mode (windowed / borderless / fullscreen)."""
+        self._display_mode = mode
+        if mode == DISPLAY_BORDERLESS:
+            self.screen = pygame.display.set_mode(
+                (self._native_w, self._native_h), pygame.NOFRAME
+            )
+            self.change_resolution(self._native_w, self._native_h, _set_mode=False)
+        elif mode == DISPLAY_FULLSCREEN:
+            self.screen = pygame.display.set_mode(
+                (self._native_w, self._native_h), pygame.FULLSCREEN
+            )
+            self.change_resolution(self._native_w, self._native_h, _set_mode=False)
+        else:  # DISPLAY_WINDOWED
+            w, h = _c.WINDOW_WIDTH, _c.WINDOW_HEIGHT
+            self.screen = pygame.display.set_mode((w, h), pygame.RESIZABLE)
+            self.change_resolution(w, h, _set_mode=False)
+
+    def change_resolution(self, w: int, h: int, _set_mode: bool = True) -> None:
         """Apply a new window resolution and rebuild all geometry-dependent views."""
-        from . import constants as _c
+        # Scale all layout constants first
+        _c.set_ui_scale(h)
         _c.WINDOW_WIDTH  = w
         _c.WINDOW_HEIGHT = h
-        _c.TOP_H = h - _c.ENT_H - _c.TASKBAR_H
         _c.MAP_W = w - _c.NAV_W
-        self.screen = pygame.display.set_mode((w, h))
+        _c.MAP_X = _c.NAV_W
+        if _set_mode:
+            if self._display_mode == DISPLAY_FULLSCREEN:
+                flags = pygame.FULLSCREEN
+            elif self._display_mode == DISPLAY_BORDERLESS:
+                flags = pygame.NOFRAME
+            else:
+                flags = pygame.RESIZABLE
+            self.screen = pygame.display.set_mode((w, h), flags)
         # Rebuild views that cache resolution-dependent geometry
         self.pause_menu  = PauseMenu(self)
         self.entity_view = EntityView(self)
@@ -629,6 +673,8 @@ class App:
                         hover = self.tooltip.hover_id
                         if isinstance(hover, str) and hover.startswith("ent:"):
                             self.open_help_view(hover[4:])
+                if event.type == pygame.WINDOWRESIZED:
+                    self.change_resolution(event.x, event.y)
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         if self.debug_view.is_active:

@@ -41,7 +41,10 @@ class Button:
         pygame.draw.rect(surface, bg, self.rect, border_radius=5)
         pygame.draw.rect(surface, C_BORDER, self.rect, width=1, border_radius=5)
         label_surf = font(self._font_size, self._bold).render(self.label, True, C_BTN_TXT)
+        old_clip = surface.get_clip()
+        surface.set_clip(self.rect)
         surface.blit(label_surf, label_surf.get_rect(center=self.rect.center))
+        surface.set_clip(old_clip)
 
 
 # ---------------------------------------------------------------------------
