@@ -28,6 +28,7 @@ from .widgets import draw_panel, Button
 _ORBIT_COLOR   = (22, 45, 80)
 _ORBIT_SEL     = (50, 100, 160)
 _GLOW_STEPS    = 5
+_DYSON_HEAT_COL = (120, 60, 20)   # dim infrared glow leaking through cage
 
 
 class MapPanel:
@@ -212,6 +213,12 @@ class MapPanel:
 
         gs = self.app.game_state
         is_probed = gs.is_probed(system.id) if gs else False
+        dyson_active = bool(
+            gs and any(
+                i.category == "structure" and i.type_value == "dyson_sphere"
+                for i in gs.entity_roster.at(system.id)
+            )
+        )
 
         # Show probe-required overlay if unprobed
         if not is_probed:
@@ -228,8 +235,14 @@ class MapPanel:
         star      = system.star
         star_col  = STAR_COLORS.get(star.star_type.value, (255, 220, 80))
         star_r    = max(10, min(22, int(star.mass * 9)))
-        self._draw_glow(surface, cx, cy, star_r + 12, star_col, steps=6)
-        pygame.draw.circle(surface, star_col, (cx, cy), star_r)
+        if dyson_active:
+            dimmed = tuple(max(0, c // 5) for c in star_col)
+            self._draw_glow(surface, cx, cy, star_r + 12, _DYSON_HEAT_COL, steps=4)
+            pygame.draw.circle(surface, dimmed, (cx, cy), star_r)
+            self._draw_dyson_cage(surface, cx, cy, star_r)
+        else:
+            self._draw_glow(surface, cx, cy, star_r + 12, star_col, steps=6)
+            pygame.draw.circle(surface, star_col, (cx, cy), star_r)
         self._hit_targets.append((star.id, cx, cy, star_r + 6))
 
         # Highlight ring if star selected
@@ -262,6 +275,8 @@ class MapPanel:
             by     = int(cy + math.sin(angle) * r_px)
 
             col, vis_r = self._body_visuals(body)
+            if dyson_active and body.body_type.value in ("planet", "exoplanet"):
+                col = self._decay_color(col)
             selected   = body.id == self.app.selected_body_id
 
             if selected:
@@ -326,6 +341,14 @@ class MapPanel:
 
         max_r_px = min(_c.MAP_W, _c.TOP_H) * 0.38
 
+        gs_pv = self.app.game_state
+        dyson_active = bool(
+            gs_pv and any(
+                i.category == "structure" and i.type_value == "dyson_sphere"
+                for i in gs_pv.entity_roster.at(system.id)
+            )
+        )
+
         # Orbit rings for moons
         for i, moon in enumerate(planet.moons):
             moon_r_au = (i + 1) * 0.06   # synthetic spacing for display
@@ -334,6 +357,8 @@ class MapPanel:
 
         # Planet at centre
         col, vis_r = self._body_visuals(planet)
+        if dyson_active:
+            col = self._decay_color(col)
         vis_r = max(vis_r, 14)
         self._draw_glow(surface, cx, cy, vis_r + 8, col, steps=4)
         pygame.draw.circle(surface, col, (cx, cy), vis_r)
@@ -422,6 +447,29 @@ class MapPanel:
             gs    = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
             pygame.draw.circle(gs, (*color[:3], alpha), (r, r), r)
             surface.blit(gs, (cx - r, cy - r), special_flags=pygame.BLEND_RGBA_ADD)
+
+    @staticmethod
+    def _decay_color(color: tuple, amount: float = 0.72) -> tuple:
+        """Blend color toward a dead-planet warm-grey tone."""
+        target = (90, 80, 70)
+        return (
+            int(color[0] + (target[0] - color[0]) * amount),
+            int(color[1] + (target[1] - color[1]) * amount),
+            int(color[2] + (target[2] - color[2]) * amount),
+        )
+
+    @staticmethod
+    def _draw_dyson_cage(surface: pygame.Surface, cx: int, cy: int, star_r: int) -> None:
+        """Draw a segmented metallic ring cage around the star."""
+        cage_r   = star_r + 9
+        cage_col = (180, 130, 60)   # warm bronze lattice
+        arc_rect = pygame.Rect(cx - cage_r, cy - cage_r, cage_r * 2, cage_r * 2)
+        segments = 12
+        full_arc = math.tau / segments
+        draw_arc = full_arc * 0.75
+        for i in range(segments):
+            start = i * full_arc
+            pygame.draw.arc(surface, cage_col, arc_rect, start, start + draw_arc, 2)
 
     # ------------------------------------------------------------------
     # Ship animation
