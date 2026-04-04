@@ -112,9 +112,10 @@ class PauseMenu:
         self.app.resume_game()
 
     def _save(self) -> None:
-        self.app.save_game()
-        now = pygame.time.get_ticks()
-        self.app._notifications.append(("GAME SAVED", now + 3000, (80, 220, 120)))
+        saved = self.app.save_game_dialog()
+        if saved:
+            now = pygame.time.get_ticks()
+            self.app._notifications.append(("GAME SAVED", now + 3000, (80, 220, 120)))
 
     def _load(self) -> None:
         self.app.load_game()

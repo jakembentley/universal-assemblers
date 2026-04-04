@@ -276,6 +276,48 @@ class App:
         with open(save_file, "w", encoding="utf-8") as fh:
             json.dump(gs_data, fh, indent=2)
 
+    def save_game_dialog(self) -> bool:
+        """Open a save-as dialog and write a named save file. Returns True if saved."""
+        if not self.galaxy or not self.game_state:
+            return False
+        path = self._save_file_dialog()
+        if not path:
+            return False
+        if not path.endswith(".json"):
+            path += ".json"
+        galaxy_file = path[:-5] + "_galaxy.json"
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        from src.logger import log_snapshot
+        log_snapshot(self.game_state, reason="manual_save")
+        from ..generator import MapGenerator as _MG
+        _MG.save(self.galaxy, galaxy_file)
+        gs_data = self.game_state.to_dict()
+        gs_data["galaxy_file"] = os.path.basename(galaxy_file)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(gs_data, fh, indent=2)
+        return True
+
+    @staticmethod
+    def _save_file_dialog() -> str | None:
+        """Show a native save-as file picker. Returns chosen path or None."""
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.asksaveasfilename(
+                title="Save Game",
+                defaultextension=".json",
+                filetypes=[("Save File", "*.json"), ("All files", "*.*")],
+                initialdir="maps",
+            )
+            root.destroy()
+            return path or None
+        except Exception as exc:
+            print(f"[save dialog] {exc}")
+            return None
+
     def _quickload(self) -> None:
         path = "maps/quicksave.json"
         if not os.path.exists(path):
