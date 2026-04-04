@@ -13,12 +13,10 @@ reset the delay timer.
 from __future__ import annotations
 
 import pygame
-from .constants import C_BORDER, font
+from . import constants as _c
+from .constants import C_BORDER
 
 _DELAY_MS = 420   # ms before the tooltip appears
-_PAD      = 8
-_LINE_H   = 18
-_MAX_W    = 300
 
 
 class Tooltip:
@@ -68,21 +66,24 @@ class Tooltip:
         if now - self._hover_since < _DELAY_MS:
             return
 
-        rendered = [font(11).render(text, True, color) for text, color in self._lines]
+        _pad    = _c.scaled(8)
+        _line_h = _c.scaled(18)
+        _max_w  = _c.scaled(300)
+
+        rendered = [_c.font_scaled(11).render(text, True, color) for text, color in self._lines]
         if not rendered:
             return
 
-        w = min(_MAX_W, max(s.get_width() for s in rendered) + _PAD * 2)
-        h = len(rendered) * _LINE_H + _PAD * 2
+        w = min(_max_w, max(s.get_width() for s in rendered) + _pad * 2)
+        h = len(rendered) * _line_h + _pad * 2
 
-        from .constants import WINDOW_WIDTH, WINDOW_HEIGHT
         mx, my = self._pos
-        tx = mx + 16
-        ty = my + 16
-        if tx + w > WINDOW_WIDTH - 4:
-            tx = mx - w - 8
-        if ty + h > WINDOW_HEIGHT - 4:
-            ty = my - h - 8
+        tx = mx + _c.scaled(16)
+        ty = my + _c.scaled(16)
+        if tx + w > _c.WINDOW_WIDTH - 4:
+            tx = mx - w - _c.scaled(8)
+        if ty + h > _c.WINDOW_HEIGHT - 4:
+            ty = my - h - _c.scaled(8)
 
         self.hit_rect = pygame.Rect(tx, ty, w, h)
 
@@ -92,4 +93,4 @@ class Tooltip:
         pygame.draw.rect(surface, C_BORDER, pygame.Rect(tx, ty, w, h), 1)
 
         for i, surf in enumerate(rendered):
-            surface.blit(surf, (tx + _PAD, ty + _PAD + i * _LINE_H))
+            surface.blit(surf, (tx + _pad, ty + _pad + i * _line_h))

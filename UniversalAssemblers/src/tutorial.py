@@ -76,14 +76,10 @@ STEPS: list[TutorialStep] = [
             "Advanced structures require manufactured materials."
         ),
         condition=lambda gs: bool(
-            gs and any(gs.factory_tasks.get(loc) for loc, _ in (
-                (s.id, None) for s in (gs.galaxy.solar_systems if gs.galaxy else [])
-            ) if False) or (
-                gs and any(
-                    len(gs.factory_tasks.get(b.id)) > 0
-                    for sys in (gs.galaxy.solar_systems if gs.galaxy else [])
-                    for b in sys.orbital_bodies
-                )
+            gs and any(
+                len(gs.factory_tasks.get(b.id)) > 0
+                for sys in (gs.galaxy.solar_systems if gs.galaxy else [])
+                for b in sys.orbital_bodies
             )
         ),
     ),
@@ -152,8 +148,11 @@ class TutorialManager:
             try:
                 if step.condition(game_state):
                     self.next_step()
-            except Exception:
-                pass   # conditions are best-effort; never crash the sim
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger("ua.tutorial").debug(
+                    "Step %d condition raised: %s", self.step_idx, exc
+                )
 
     def skip(self) -> None:
         self.complete = True

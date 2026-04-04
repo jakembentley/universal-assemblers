@@ -242,7 +242,7 @@ _STRUCTURE_TYPES: frozenset[str] = frozenset({
     "extractor", "factory", "research_array", "shipyard", "storage_hub",
     "replicator", "power_plant_solar", "power_plant_wind", "power_plant_bios",
     "power_plant_fossil", "power_plant_nuclear", "power_plant_cold_fusion",
-    "power_plant_dark_matter", "dyson_sphere",
+    "power_plant_dark_matter",
 })
 
 
@@ -390,10 +390,10 @@ class SimulationEngine:
                     all_entities = self.gs.entity_roster.at(pop.body_id)
                     # Enforcer bots intercept attacks — each enforcer at this body has a
                     # chance to block the attack entirely
-                    enforcer_count = next(
-                        (e.count for e in all_entities
-                         if e.category == "bot" and e.type_value == "enforcer"),
-                        0,
+                    enforcer_count = sum(
+                        e.count for e in all_entities
+                        if e.category == "bot" and e.type_value == "enforcer"
+                        and e.count > 0
                     )
                     intercepted = any(
                         rng.random() < _ENFORCER_INTERCEPT_CHANCE
@@ -643,6 +643,7 @@ class SimulationEngine:
 
     def _tick_dyson_spheres(self, dt_years: float) -> list:
         """Dyson Spheres gradually decay orbital planet resources over time."""
+        from .models.celestial import BodyType
         events: list = []
         gs = self.gs
         galaxy = gs.galaxy
@@ -657,10 +658,14 @@ class SimulationEngine:
             )
             if not dyson_count:
                 continue
+            bodies_to_decay = []
             for body in sys.orbital_bodies:
-                from .models.celestial import BodyType
                 if body.body_type == BodyType.STAR:
                     continue
+                bodies_to_decay.append(body)
+                for moon in body.moons:
+                    bodies_to_decay.append(moon)
+            for body in bodies_to_decay:
                 res = getattr(body, "resources", None)
                 if res is None:
                     continue

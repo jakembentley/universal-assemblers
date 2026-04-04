@@ -90,7 +90,6 @@ class App:
         self.tooltip         = Tooltip()
         self.debug_view      = DebugView(self)
         self.new_game_panel  = NewGamePanel(self)
-        self.tutorial        = TutorialManager()
         self.tutorial_overlay = TutorialOverlay(self)
 
         # Toast notifications: each entry is (message, expiry_ms, color)
@@ -269,7 +268,6 @@ class App:
         self.state       = "galaxy"
 
         # Tutorial mode — enable if requested in settings
-        from ..tutorial import TutorialManager
         self.tutorial = TutorialManager()
         if settings.get("tutorial_mode", False):
             self.tutorial.enabled = True
@@ -291,6 +289,7 @@ class App:
         _MG.save(self.galaxy, galaxy_file)
         gs_data = self.game_state.to_dict()
         gs_data["galaxy_file"] = galaxy_file
+        gs_data["tutorial"] = self.tutorial.to_dict()
         with open(save_file, "w", encoding="utf-8") as fh:
             json.dump(gs_data, fh, indent=2)
 
@@ -311,6 +310,7 @@ class App:
         _MG.save(self.galaxy, galaxy_file)
         gs_data = self.game_state.to_dict()
         gs_data["galaxy_file"] = os.path.basename(galaxy_file)
+        gs_data["tutorial"] = self.tutorial.to_dict()
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(gs_data, fh, indent=2)
         return True
@@ -395,6 +395,9 @@ class App:
             )
             print(f"[load_game] Failed to load '{path}': {exc}")
             return
+
+        if "tutorial" in data:
+            self.tutorial = TutorialManager.from_dict(data["tutorial"])
 
         self._selected_system_idx   = 0
         self.selected_body_id       = None
@@ -562,7 +565,9 @@ class App:
                 col = (255, 160, 40)
             elif etype == "enforcer_intercept":
                 loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
-                n   = ev.get("enforcers", 1)
+                n   = ev.get("enforcers", 0)
+                if not n:
+                    continue
                 msg = f"ENFORCER: bios attack intercepted at {loc} ({n} enforcer{'s' if n != 1 else ''})"
                 col = (80, 200, 120)
             elif etype in ("bios_entity_damaged", "bios_entity_destroyed"):

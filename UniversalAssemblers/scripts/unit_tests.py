@@ -31,7 +31,7 @@ def section(title: str) -> None:
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-from src.game_state import GameState
+from src.game_state import GameState, BotTask
 from src.generator import MapGenerator
 
 def _fresh_gs():
@@ -1901,8 +1901,6 @@ except Exception as e:
 
 # ─── repair_damage / BotTask repair ──────────────────────────────────────────
 section("repair_damage / BotTask repair")
-
-from src.game_state import BotTask
 
 # repair_damage reduces entity_damage by given amount
 try:

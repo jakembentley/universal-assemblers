@@ -13,10 +13,11 @@ from .constants import (
     C_PANEL, C_BORDER, C_ACCENT, C_TEXT, C_TEXT_DIM, C_BTN, C_BTN_TXT,
     PADDING, font,
 )
+from src.tutorial import STEPS
 
 
 _PANEL_W  = 360
-_PANEL_H  = 190
+_PANEL_H  = 230
 _MARGIN_X = 12
 _MARGIN_Y = 12
 
@@ -56,11 +57,13 @@ class TutorialOverlay:
         sy = _c.WINDOW_HEIGHT - _PANEL_H - _c.TASKBAR_H - _MARGIN_Y
 
         panel = pygame.Rect(sx, sy, _PANEL_W, _PANEL_H)
-        pygame.draw.rect(surface, (8, 16, 36, 220), panel, border_radius=6)
+        panel_surf = pygame.Surface((_PANEL_W, _PANEL_H), pygame.SRCALPHA)
+        pygame.draw.rect(panel_surf, (8, 16, 36, 220), panel_surf.get_rect(), border_radius=6)
+        surface.blit(panel_surf, (sx, sy))
         pygame.draw.rect(surface, C_ACCENT, panel, 1, border_radius=6)
 
         # Step counter badge
-        total   = len(__import__("src.tutorial", fromlist=["STEPS"]).STEPS)
+        total   = len(STEPS)
         badge   = font(10, bold=True).render(
             f"TUTORIAL  {tm.step_idx + 1}/{total}", True, C_ACCENT
         )
@@ -73,6 +76,9 @@ class TutorialOverlay:
         # Body (word-wrap at ~48 chars)
         bx = sx + PADDING
         by = sy + 40
+        body_bottom = sy + _PANEL_H - 38
+        clip_prev = surface.get_clip()
+        surface.set_clip(pygame.Rect(sx, sy + 40, _PANEL_W, _PANEL_H - 78))
         for raw_line in step.body.split("\n"):
             words = raw_line.split()
             if not words:
@@ -91,11 +97,10 @@ class TutorialOverlay:
             if line:
                 surface.blit(font(11).render(line, True, C_TEXT_DIM), (bx, by))
                 by += 14
+        surface.set_clip(clip_prev)
 
         # NEXT button
-        next_label = "FINISH" if tm.step_idx >= len(
-            __import__("src.tutorial", fromlist=["STEPS"]).STEPS
-        ) - 1 else "NEXT  ▶"
+        next_label = "FINISH" if tm.step_idx >= len(STEPS) - 1 else "NEXT  ▶"
         next_r = pygame.Rect(sx + _PANEL_W - 90, sy + _PANEL_H - 34, 80, 26)
         mouse  = pygame.mouse.get_pos()
         nb_col = (0, 100, 60) if next_r.collidepoint(mouse) else (0, 80, 50)

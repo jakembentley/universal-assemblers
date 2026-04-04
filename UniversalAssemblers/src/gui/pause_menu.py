@@ -141,6 +141,7 @@ class PauseMenu:
 
     def _open_keybinds_sub(self) -> None:
         self._keybinds_active = True
+        self._kb_hit_rects = []
 
     def _close_keybinds_sub(self) -> None:
         self._keybinds_active = False

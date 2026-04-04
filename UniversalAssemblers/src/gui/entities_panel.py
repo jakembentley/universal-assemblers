@@ -69,9 +69,17 @@ class EntitiesPanel:
         self.rect = pygame.Rect(0, _c.TOP_H + TASKBAR_H, _c.WINDOW_WIDTH, ENT_H)
         # Hit rects populated each draw(): (rect, category, type_val)
         self._hit_rects: list[tuple[pygame.Rect, str, str]] = []
+        self._scroll_y:   int = 0
+        self._max_scroll: int = 0
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
+            if event.type == pygame.MOUSEWHEEL:
+                if self.rect.collidepoint(pygame.mouse.get_pos()):
+                    row_h = ROW_H - 2
+                    self._scroll_y = max(
+                        0, min(self._max_scroll, self._scroll_y - event.y * row_h)
+                    )
             if event.type == pygame.MOUSEMOTION:
                 if self.rect.collidepoint(event.pos):
                     hit = next(
@@ -132,19 +140,24 @@ class EntitiesPanel:
 
         self._hit_rects = []
         mouse_pos = pygame.mouse.get_pos()
-        col_w = content.width // len(_COLUMNS)
-        row_h = ROW_H - 2
+        _SB_W  = 6   # scrollbar width
+        col_w  = (content.width - _SB_W) // len(_COLUMNS)
+        row_h  = ROW_H - 2
+        hdr_h  = 26  # column title + separator height
 
+        # Row area (below column headers, above panel bottom)
+        row_area = pygame.Rect(content.x, content.y + hdr_h,
+                               content.width - _SB_W, content.height - hdr_h)
+
+        # --- Pass 1: column headers (unclipped) ---
         for ci, (title, category, types, accent) in enumerate(_COLUMNS):
             cx = content.x + ci * col_w
             cy = content.y
 
-            # Column total (global) and at-location count
             col_total = (
                 sum(roster.total(category, tv) for tv, _, _ in types)
                 if roster else 0
             )
-            # Location used for "here" count
             if category == "ship":
                 here_loc = sys_id
             else:
@@ -160,37 +173,53 @@ class EntitiesPanel:
             header_txt = f"{title.upper()}  ({col_here} here / {col_total} total)"
             header = font(11, bold=True).render(header_txt, True, accent)
             surface.blit(header, (cx + PADDING, cy + 4))
-
             draw_separator(surface, cx + PADDING, cy + 22, cx + col_w - PADDING)
-
             if ci > 0:
                 pygame.draw.line(surface, C_SEP, (cx, content.y), (cx, content.bottom), 1)
 
-            row_y = cy + 26
-            for type_val, name, icon in types:
-                if row_y + row_h > content.bottom:
-                    break
+        # Compute max content height (tallest column) for scrollbar
+        max_col_rows = 0
+        if roster:
+            for _, category, types, _ in _COLUMNS:
+                visible = sum(1 for tv, _, _ in types if roster.total(category, tv) > 0)
+                max_col_rows = max(max_col_rows, visible)
+        content_h   = max_col_rows * row_h
+        visible_h   = row_area.height
+        self._max_scroll = max(0, content_h - visible_h)
+        self._scroll_y   = min(self._scroll_y, self._max_scroll)
 
-                # "here" count at current location; global total for dim/bright logic
+        # --- Pass 2: rows (clipped to row_area, offset by scroll) ---
+        old_clip = surface.get_clip()
+        surface.set_clip(row_area)
+
+        for ci, (title, category, types, accent) in enumerate(_COLUMNS):
+            cx = content.x + ci * col_w
+            if category == "ship":
+                here_loc = sys_id
+            else:
+                here_loc = body_id or sys_id
+
+            row_y = row_area.y - self._scroll_y
+            for type_val, name, icon in types:
+                total_count = roster.total(category, type_val) if roster else 0
+                if total_count == 0:
+                    continue
+
                 here_count = (
                     sum(i.count for i in roster.at(here_loc or "")
                         if i.category == category and i.type_value == type_val)
                     if roster and here_loc else 0
                 )
-                total_count = roster.total(category, type_val) if roster else 0
 
                 row_rect = pygame.Rect(cx + 1, row_y, col_w - 2, row_h)
                 self._hit_rects.append((row_rect, category, type_val))
 
-                if row_rect.collidepoint(mouse_pos) and total_count > 0:
+                if row_rect.collidepoint(mouse_pos):
                     pygame.draw.rect(surface, C_HOVER, row_rect, border_radius=2)
 
                 icon_surf = font(12).render(icon, True, accent)
-                name_surf = font(12).render(
-                    name, True, C_TEXT_DIM if total_count == 0 else C_TEXT
-                )
-                # Show "here / total" when they differ; otherwise just the here count
-                if total_count > here_count and total_count > 0:
+                name_surf = font(12).render(name, True, C_TEXT)
+                if total_count > here_count:
                     count_txt = f"{here_count}/{total_count}"
                     count_col = C_TEXT_DIM if here_count == 0 else C_SELECTED
                 else:
@@ -203,6 +232,22 @@ class EntitiesPanel:
                 surface.blit(count_surf, (cx + col_w - PADDING - count_surf.get_width(), row_y))
 
                 row_y += row_h
+
+        surface.set_clip(old_clip)
+
+        # --- Scrollbar ---
+        if self._max_scroll > 0:
+            sb_x    = content.right - _SB_W
+            thumb_h = max(16, int(row_area.height * visible_h / content_h))
+            thumb_y = row_area.y + int(
+                (row_area.height - thumb_h) * self._scroll_y / self._max_scroll
+            )
+            pygame.draw.rect(surface, (30, 50, 80),
+                             pygame.Rect(sb_x, row_area.y, _SB_W - 1, row_area.height),
+                             border_radius=2)
+            pygame.draw.rect(surface, C_ACCENT,
+                             pygame.Rect(sb_x, thumb_y, _SB_W - 1, thumb_h),
+                             border_radius=2)
 
     # ------------------------------------------------------------------
     # Tooltip helper

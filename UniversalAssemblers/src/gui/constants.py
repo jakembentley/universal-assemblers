@@ -14,19 +14,31 @@ FPS           = 60
 TITLE         = "Universal Assemblers"
 
 # ---------------------------------------------------------------------------
+# Scale infrastructure
+# ---------------------------------------------------------------------------
+BASE_HEIGHT = 1080
+UI_SCALE    = 1.0   # updated by set_ui_scale() on init and resolution change
+
+
+def scaled(n: int) -> int:
+    """Scale a pixel value by UI_SCALE, minimum 1."""
+    return max(1, int(n * UI_SCALE))
+
+
+# ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
-NAV_W     = 340                            # left panel width
-ENT_H     = 190                            # bottom entities panel height
-TASKBAR_H = 36                             # top taskbar height
+NAV_W     = scaled(340)                    # left panel width
+ENT_H     = scaled(190)                    # bottom entities panel height
+TASKBAR_H = scaled(36)                     # top taskbar height
 TOP_H     = WINDOW_HEIGHT - ENT_H - TASKBAR_H  # height of the two main view panels
 MAP_X     = NAV_W                          # map panel x origin
 MAP_W     = WINDOW_WIDTH - NAV_W          # map panel width
 
-HEADER_H    = 26                            # panel title bar height
-ROW_H       = 22                            # list row height
-PADDING     = 8
-RES_STRIP_H = 160                           # global resources strip height
+HEADER_H    = scaled(26)                   # panel title bar height
+ROW_H       = scaled(22)                   # list row height
+PADDING     = scaled(8)
+RES_STRIP_H = scaled(160)                  # global resources strip height
 
 # ---------------------------------------------------------------------------
 # Colours
@@ -90,3 +102,28 @@ def font(size: int, bold: bool = False) -> pygame.font.Font:
         else:
             _font_cache[key] = pygame.font.Font(None, size + 4)
     return _font_cache[key]
+
+
+def font_scaled(size: int, bold: bool = False) -> pygame.font.Font:
+    """Return a font scaled by UI_SCALE, minimum size 8."""
+    return font(max(8, scaled(size)), bold)
+
+
+def set_ui_scale(screen_height: int) -> None:
+    """Recompute all layout globals for the given screen height.
+    Must be called before any view is constructed or rebuilt.
+    """
+    import sys
+    _mod = sys.modules[__name__]
+    _mod.UI_SCALE   = screen_height / BASE_HEIGHT
+    _mod.NAV_W      = scaled(340)
+    _mod.ENT_H      = scaled(190)
+    _mod.TASKBAR_H  = scaled(36)
+    _mod.HEADER_H   = scaled(26)
+    _mod.ROW_H      = scaled(22)
+    _mod.PADDING    = scaled(8)
+    _mod.RES_STRIP_H = scaled(160)
+    _mod.TOP_H      = screen_height - _mod.ENT_H - _mod.TASKBAR_H
+    # MAP_W and MAP_X depend on WINDOW_WIDTH; those are patched by
+    # change_resolution() after calling set_ui_scale().
+    _font_cache.clear()

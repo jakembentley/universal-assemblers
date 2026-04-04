@@ -12,11 +12,10 @@ Activated by pressing T or clicking the TECH TREE button in the taskbar.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, TASKBAR_H, HEADER_H, ROW_H, PADDING,
     C_BG, C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SELECTED, C_HOVER, C_WARN, C_SEP, C_BTN, C_BTN_HOV, C_BTN_TXT,
-    font,
 )
 from .widgets import draw_panel, draw_separator, Button
 from ..models.tech import TECH_TREE, TechNode
@@ -35,12 +34,6 @@ _BRANCH_COLORS: dict[str, tuple] = {
     "special":      (220, 140, 255),
 }
 
-# Node card dimensions
-_CARD_W = 230
-_CARD_H = 110
-_CARD_GAP = 12
-_COL_X_START = PADDING + 60   # first column x
-
 
 class TechView:
 
@@ -48,13 +41,21 @@ class TechView:
         self.app       = app
         self.is_active = False
 
-        self._rect = pygame.Rect(0, TASKBAR_H, WINDOW_WIDTH, WINDOW_HEIGHT - TASKBAR_H)
+        # Scaled card dimensions (computed at construction time)
+        self._card_w   = _c.scaled(230)
+        self._card_h   = _c.scaled(110)
+        self._card_gap = _c.scaled(12)
+
+        self._rect = pygame.Rect(
+            0, _c.TASKBAR_H, _c.WINDOW_WIDTH, _c.WINDOW_HEIGHT - _c.TASKBAR_H
+        )
 
         self._close_btn = Button(
-            (self._rect.right - 100, self._rect.y + 8, 90, 26),
+            (self._rect.right - _c.scaled(100), self._rect.y + _c.scaled(8),
+             _c.scaled(90), _c.scaled(26)),
             "✕  CLOSE",
             callback=self._close,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
 
         # Scroll offset (pixels from top of content)
@@ -122,16 +123,16 @@ class TechView:
         pygame.draw.rect(surface, C_BORDER, self._rect, width=1)
 
         # Header bar
-        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, HEADER_H + 4)
+        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, _c.HEADER_H + 4)
         pygame.draw.rect(surface, C_HEADER, hdr_r)
-        t = font(14, bold=True).render("TECHNOLOGY TREE", True, C_ACCENT)
-        surface.blit(t, (self._rect.x + PADDING, self._rect.y + 7))
+        t = _c.font_scaled(14, bold=True).render("TECHNOLOGY TREE", True, C_ACCENT)
+        surface.blit(t, (self._rect.x + _c.PADDING, self._rect.y + 7))
         self._close_btn.draw(surface)
 
         gs = self.app.game_state
         if not gs:
-            nm = font(13).render("No game in progress.", True, C_TEXT_DIM)
-            surface.blit(nm, (self._rect.x + PADDING, self._rect.y + HEADER_H + 20))
+            nm = _c.font_scaled(13).render("No game in progress.", True, C_TEXT_DIM)
+            surface.blit(nm, (self._rect.x + _c.PADDING, self._rect.y + _c.HEADER_H + 20))
             return
 
         # Research summary line
@@ -139,20 +140,20 @@ class TechView:
         total_count      = len(TECH_TREE)
         in_prog          = gs.tech.in_progress_ids()
         array_count      = gs.entity_roster.total("structure", "research_array")
-        sum_s = font(12).render(
+        sum_s = _c.font_scaled(12).render(
             f"Researched: {researched_count}/{total_count}   "
             f"In progress: {len(in_prog)}   "
             f"Research Arrays: {array_count}",
             True, C_TEXT_DIM,
         )
-        surface.blit(sum_s, (self._rect.x + PADDING, self._rect.y + HEADER_H + 8))
+        surface.blit(sum_s, (self._rect.x + _c.PADDING, self._rect.y + _c.HEADER_H + 8))
 
-        content_y_start = self._rect.y + HEADER_H + 30
+        content_y_start = self._rect.y + _c.HEADER_H + 30
 
         # Clip content area (scrollable)
         clip_rect = pygame.Rect(
             self._rect.x, content_y_start,
-            self._rect.width, self._rect.height - HEADER_H - 30,
+            self._rect.width, self._rect.height - _c.HEADER_H - 30,
         )
         old_clip = surface.get_clip()
         surface.set_clip(clip_rect)
@@ -184,31 +185,31 @@ class TechView:
             branches[branch].append((tech_id, node))
 
         num_cols    = len(_BRANCH_ORDER)
-        col_w       = (self._rect.width - PADDING * 2) // num_cols
+        col_w       = (self._rect.width - _c.PADDING * 2) // num_cols
         max_col_h   = 0
 
         for ci, branch in enumerate(_BRANCH_ORDER):
-            col_x   = self._rect.x + PADDING + ci * col_w
+            col_x   = self._rect.x + _c.PADDING + ci * col_w
             card_y  = base_y + 10
 
             # Branch header
-            bh_s = font(11, bold=True).render(branch.upper(), True,
+            bh_s = _c.font_scaled(11, bold=True).render(branch.upper(), True,
                                               _BRANCH_COLORS.get(branch, C_ACCENT))
-            surface.blit(bh_s, (col_x + (_CARD_W - bh_s.get_width()) // 2, card_y))
+            surface.blit(bh_s, (col_x + (self._card_w - bh_s.get_width()) // 2, card_y))
             card_y += 22
 
             for tech_id, node in sorted(branches[branch],
                                         key=lambda x: len(x[1].prerequisites)):
                 card_y = self._draw_card(surface, gs, tech_id, node,
-                                         col_x, card_y, _CARD_W)
-                card_y += _CARD_GAP
+                                         col_x, card_y, self._card_w)
+                card_y += self._card_gap
 
             col_h = card_y - base_y
             if col_h > max_col_h:
                 max_col_h = col_h
 
         self._content_h = max_col_h
-        visible_h       = self._rect.height - HEADER_H - 30
+        visible_h       = self._rect.height - _c.HEADER_H - 30
         self._max_scroll = max(0, self._content_h - visible_h)
 
     def _draw_card(
@@ -248,29 +249,29 @@ class TechView:
             status_txt = "LOCKED"
             status_col = C_TEXT_DIM
 
-        card_r = pygame.Rect(cx, cy, w, _CARD_H)
+        card_r = pygame.Rect(cx, cy, w, self._card_h)
         pygame.draw.rect(surface, bg_col,     card_r, border_radius=5)
         pygame.draw.rect(surface, border_col, card_r, width=1, border_radius=5)
 
-        tx = cx + 8
-        ty = cy + 6
+        tx = cx + _c.scaled(8)
+        ty = cy + _c.scaled(6)
 
         # Node name
-        name_s = font(12, bold=True).render(node.name, True, C_TEXT)
+        name_s = _c.font_scaled(12, bold=True).render(node.name, True, C_TEXT)
         surface.blit(name_s, (tx, ty))
-        ty += 17
+        ty += _c.scaled(17)
 
         # Status badge
-        st_s = font(10, bold=True).render(status_txt, True, status_col)
+        st_s = _c.font_scaled(10, bold=True).render(status_txt, True, status_col)
         surface.blit(st_s, (tx, ty))
-        ty += 14
+        ty += _c.scaled(14)
 
         # Description (truncated to fit)
         desc = node.description
         max_chars = (w - 16) // 6
         if len(desc) > max_chars:
             desc = desc[:max_chars - 1] + "…"
-        desc_s = font(10).render(desc, True, C_TEXT_DIM)
+        desc_s = _c.font_scaled(10).render(desc, True, C_TEXT_DIM)
         surface.blit(desc_s, (tx, ty))
         ty += 14
 
@@ -283,7 +284,7 @@ class TechView:
             pr_text = f"Req: {prereqs}"
             if len(pr_text) > max_chars:
                 pr_text = pr_text[:max_chars - 1] + "…"
-            pr_s = font(10).render(pr_text, True, (120, 120, 160))
+            pr_s = _c.font_scaled(10).render(pr_text, True, (120, 120, 160))
             surface.blit(pr_s, (tx, ty))
         ty += 13
 
@@ -295,7 +296,7 @@ class TechView:
                              pygame.Rect(tx, ty, pbar_w, 6), border_radius=3)
             pygame.draw.rect(surface, C_WARN,
                              pygame.Rect(tx, ty, int(pbar_w * frac), 6), border_radius=3)
-            pct_s = font(10).render(f"{frac:.0%}", True, C_WARN)
+            pct_s = _c.font_scaled(10).render(f"{frac:.0%}", True, C_WARN)
             surface.blit(pct_s, (tx + pbar_w - pct_s.get_width(), ty - 14))
             ty += 10
         elif is_researched:
@@ -306,10 +307,11 @@ class TechView:
 
         # Research button (available and not yet started)
         if can_research and not is_in_progress:
-            btn_r = pygame.Rect(cx + w - 88, cy + _CARD_H - 26, 80, 20)
+            btn_r = pygame.Rect(cx + w - _c.scaled(88), cy + self._card_h - _c.scaled(26),
+                                _c.scaled(80), _c.scaled(20))
             pygame.draw.rect(surface, C_BTN_HOV, btn_r, border_radius=3)
-            btn_s = font(10, bold=True).render("RESEARCH", True, C_BTN_TXT)
+            btn_s = _c.font_scaled(10, bold=True).render("RESEARCH", True, C_BTN_TXT)
             surface.blit(btn_s, btn_s.get_rect(center=btn_r.center))
             self._research_btns.append((btn_r, tech_id))
 
-        return cy + _CARD_H
+        return cy + self._card_h

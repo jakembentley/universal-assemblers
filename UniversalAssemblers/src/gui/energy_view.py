@@ -9,19 +9,13 @@ Activated via App.open_energy_view() / taskbar "⚡ ENERGY" button.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, TASKBAR_H, HEADER_H, ROW_H, PADDING,
     C_PANEL, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
     C_SELECTED, C_HOVER, C_WARN, C_SEP, C_BTN, C_BTN_HOV, C_BTN_TXT,
     C_BG,
-    font,
 )
 from .widgets import draw_panel, draw_separator, Button
-
-_BODY_ROW_H   = 28
-_SUBROW_H     = 20
-_FILTER_BTN_H = 24
-_FILTER_BTN_W = 110
 
 
 class EnergyView:
@@ -31,13 +25,19 @@ class EnergyView:
         self.app       = app
         self.is_active = False
 
-        self._rect = pygame.Rect(0, TASKBAR_H, WINDOW_WIDTH, WINDOW_HEIGHT - TASKBAR_H)
+        self._body_row_h   = _c.scaled(28)
+        self._subrow_h     = _c.scaled(20)
+        self._filter_btn_h = _c.scaled(24)
+        self._filter_btn_w = _c.scaled(110)
+
+        self._rect = pygame.Rect(0, _c.TASKBAR_H, _c.WINDOW_WIDTH, _c.WINDOW_HEIGHT - _c.TASKBAR_H)
 
         self._close_btn = Button(
-            (self._rect.right - 100, self._rect.y + 8, 90, 26),
+            (self._rect.right - _c.scaled(100), self._rect.y + _c.scaled(8),
+             _c.scaled(90), _c.scaled(26)),
             "✕  CLOSE",
             callback=self._close,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
 
         self._scroll_y:   int       = 0
@@ -71,9 +71,9 @@ class EnergyView:
                 self._close()
                 return
             if event.type == pygame.MOUSEWHEEL:
-                visible_h = self._rect.height - HEADER_H - _FILTER_BTN_H - 16
+                visible_h = self._rect.height - _c.HEADER_H - self._filter_btn_h - 16
                 max_scroll = max(0, self._content_h - visible_h)
-                self._scroll_y = max(0, min(max_scroll, self._scroll_y - event.y * _BODY_ROW_H))
+                self._scroll_y = max(0, min(max_scroll, self._scroll_y - event.y * self._body_row_h))
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for rect, sys_id in self._filter_btns:
                     if rect.collidepoint(event.pos):
@@ -90,16 +90,16 @@ class EnergyView:
         pygame.draw.rect(surface, C_BORDER, self._rect, width=1)
 
         # Header bar
-        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, HEADER_H)
+        hdr_r = pygame.Rect(self._rect.x, self._rect.y, self._rect.width, _c.HEADER_H)
         pygame.draw.rect(surface, C_HEADER, hdr_r)
-        hdr_s = font(14, bold=True).render("⚡ ENERGY OVERVIEW", True, C_ACCENT)
-        surface.blit(hdr_s, (self._rect.x + PADDING, self._rect.y + 5))
+        hdr_s = _c.font_scaled(14, bold=True).render("⚡ ENERGY OVERVIEW", True, C_ACCENT)
+        surface.blit(hdr_s, (self._rect.x + _c.PADDING, self._rect.y + 5))
         self._close_btn.draw(surface)
 
         # Filter tabs
         self._filter_btns = []
-        fx = self._rect.x + PADDING
-        fy = self._rect.y + HEADER_H + 4
+        fx = self._rect.x + _c.PADDING
+        fy = self._rect.y + _c.HEADER_H + 4
         tabs: list[tuple[str, str | None]] = [("All", None)]
         gs = self.app.game_state
         galaxy = self.app.galaxy
@@ -109,18 +109,18 @@ class EnergyView:
                 if gs.get_state(sys.id) in (DiscoveryState.DISCOVERED, DiscoveryState.COLONIZED):
                     tabs.append((sys.name[:12], sys.id))
         for label, sys_id in tabs:
-            tb_r = pygame.Rect(fx, fy, _FILTER_BTN_W, _FILTER_BTN_H)
+            tb_r = pygame.Rect(fx, fy, self._filter_btn_w, self._filter_btn_h)
             sel = self._filter_system == sys_id
             pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, tb_r, border_radius=3)
-            tb_s = font(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT)
+            tb_s = _c.font_scaled(10, bold=True).render(label, True, (0, 0, 0) if sel else C_BTN_TXT)
             surface.blit(tb_s, tb_s.get_rect(center=tb_r.center))
             self._filter_btns.append((tb_r, sys_id))
-            fx += _FILTER_BTN_W + 4
-            if fx + _FILTER_BTN_W > self._rect.right - PADDING:
-                fx = self._rect.x + PADDING
-                fy += _FILTER_BTN_H + 4
+            fx += self._filter_btn_w + 4
+            if fx + self._filter_btn_w > self._rect.right - _c.PADDING:
+                fx = self._rect.x + _c.PADDING
+                fy += self._filter_btn_h + 4
 
-        content_y_start = self._rect.y + HEADER_H + _FILTER_BTN_H + 12
+        content_y_start = self._rect.y + _c.HEADER_H + self._filter_btn_h + 12
         content_rect = pygame.Rect(
             self._rect.x, content_y_start,
             self._rect.width, self._rect.height - (content_y_start - self._rect.y)
@@ -131,7 +131,7 @@ class EnergyView:
         surface.set_clip(content_rect)
 
         cy = content_y_start - self._scroll_y
-        cx = self._rect.x + PADDING
+        cx = self._rect.x + _c.PADDING
 
         if not gs or not galaxy:
             surface.set_clip(old_clip)
@@ -189,7 +189,7 @@ class EnergyView:
                             offline_plants.append(struct_type.value)
 
                 subrow_count = len(offline_plants)
-                total_row_h = _BODY_ROW_H + subrow_count * _SUBROW_H
+                total_row_h = self._body_row_h + subrow_count * self._subrow_h
                 body_rows.append((body, prod, cons, offline_plants, total_row_h))
 
             if not body_rows:
@@ -199,8 +199,8 @@ class EnergyView:
             sys_net = sys_total_prod - sys_total_cons
             sys_col = (80, 220, 100) if sys_net >= 0 else (255, 80, 80)
             if cy >= content_y_start - 20 and cy < content_rect.bottom:
-                draw_separator(surface, cx, cy, self._rect.right - PADDING)
-                sys_lbl = font(11, bold=True).render(
+                draw_separator(surface, cx, cy, self._rect.right - _c.PADDING)
+                sys_lbl = _c.font_scaled(11, bold=True).render(
                     f"SYSTEM: {sys.name}   Prod: +{sys_total_prod:,.0f}   "
                     f"Cons: -{sys_total_cons:,.0f}   Net: {sys_net:+,.0f}",
                     True, sys_col,
@@ -216,27 +216,27 @@ class EnergyView:
                 throttle_pct = int(throttle * 100)
                 throttle_col = C_ACCENT if throttle >= 1.0 else C_WARN
 
-                if cy >= content_y_start - _BODY_ROW_H and cy < content_rect.bottom:
+                if cy >= content_y_start - self._body_row_h and cy < content_rect.bottom:
                     # Body row
-                    row_r = pygame.Rect(cx, cy, self._rect.width - PADDING * 2, _BODY_ROW_H)
+                    row_r = pygame.Rect(cx, cy, self._rect.width - _c.PADDING * 2, self._body_row_h)
                     pygame.draw.rect(surface, (15, 25, 50), row_r, border_radius=2)
 
-                    body_name_s = font(11, bold=True).render(
+                    body_name_s = _c.font_scaled(11, bold=True).render(
                         f"● {body.name}", True, C_TEXT
                     )
                     surface.blit(body_name_s, (cx + 6, cy + 6))
 
                     # Energy stats right-aligned
-                    stats_s = font(10).render(
+                    stats_s = _c.font_scaled(10).render(
                         f"Prod: +{prod:,.0f}  |  Cons: -{cons:,.0f}  |  Net: {net:+,.0f}",
                         True, C_TEXT_DIM,
                     )
                     surface.blit(stats_s, (cx + 180, cy + 6))
 
-                    thr_s = font(10, bold=True).render(
+                    thr_s = _c.font_scaled(10, bold=True).render(
                         f"Throttle: {throttle_pct}%", True, throttle_col
                     )
-                    surface.blit(thr_s, (self._rect.right - PADDING - thr_s.get_width() - 4, cy + 6))
+                    surface.blit(thr_s, (self._rect.right - _c.PADDING - thr_s.get_width() - 4, cy + 6))
 
                     # Net color bar
                     bar_w = max(0, min(80, int(80 * min(throttle, 1.0))))
@@ -244,7 +244,7 @@ class EnergyView:
                     if bar_w > 0:
                         pygame.draw.rect(surface, row_col, pygame.Rect(cx + 6, cy + 22, bar_w, 4))
 
-                cy += _BODY_ROW_H
+                cy += self._body_row_h
 
                 # Bot consumption sub-row
                 bot_cons = sum(
@@ -253,23 +253,23 @@ class EnergyView:
                     if i.category == "bot"
                 )
                 if bot_cons > 0:
-                    if cy >= content_y_start - _SUBROW_H and cy < content_rect.bottom:
-                        bot_s = font(10).render(
+                    if cy >= content_y_start - self._subrow_h and cy < content_rect.bottom:
+                        bot_s = _c.font_scaled(10).render(
                             f"  ↳ Bots: -{bot_cons:,.0f}/yr",
                             True, (160, 200, 255),
                         )
                         surface.blit(bot_s, (cx + 16, cy + 2))
-                    cy += _SUBROW_H
+                    cy += self._subrow_h
 
                 # Offline plant sub-rows
                 for plant_tv in offline_plants:
-                    if cy >= content_y_start - _SUBROW_H and cy < content_rect.bottom:
-                        warn_s = font(10).render(
+                    if cy >= content_y_start - self._subrow_h and cy < content_rect.bottom:
+                        warn_s = _c.font_scaled(10).render(
                             f"  ⚠ {plant_tv.replace('_',' ').title()} OFFLINE (fuel depleted)",
                             True, (220, 80, 80),
                         )
                         surface.blit(warn_s, (cx + 16, cy + 2))
-                    cy += _SUBROW_H
+                    cy += self._subrow_h
 
                 total_content_h += row_h
 

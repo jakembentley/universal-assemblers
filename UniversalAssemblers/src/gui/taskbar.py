@@ -11,13 +11,8 @@ from __future__ import annotations
 
 import pygame
 from . import constants as _c
-from .constants import (
-    TASKBAR_H,
-    C_BORDER, C_ACCENT, font,
-)
+from .constants import C_BORDER, C_ACCENT, font
 from .widgets import Button
-
-_CLOCK_RESERVE = 280   # pixels on the right reserved for the GameClock overlay
 
 
 class TaskBar:
@@ -25,45 +20,55 @@ class TaskBar:
     def __init__(self, app) -> None:
         self.app = app
 
-        bw, bh = 120, 26
-        by = (TASKBAR_H - bh) // 2
+        bw  = _c.scaled(120)
+        bh  = _c.scaled(26)
+        gap = _c.scaled(8)
+        by  = (_c.TASKBAR_H - bh) // 2
 
+        x = gap
         self._galaxy_btn = Button(
-            (8, by, bw, bh),
+            (x, by, bw, bh),
             "<<  GALAXY MAP",
             callback=self._go_galaxy,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        x += bw + gap
         self._tech_btn = Button(
-            (8 + bw + 8, by, 110, bh),
+            (x, by, _c.scaled(110), bh),
             "TECH TREE",
             callback=self._open_tech,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        x += _c.scaled(110) + gap
         self._energy_btn = Button(
-            (8 + bw + 8 + 110 + 8, by, 90, bh),
+            (x, by, _c.scaled(90), bh),
             "⚡ ENERGY",
             callback=self._open_energy,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        x += _c.scaled(90) + gap
         self._queue_btn = Button(
-            (8 + bw + 8 + 110 + 8 + 90 + 8, by, 90, bh),
+            (x, by, _c.scaled(90), bh),
             "≡ QUEUE",
             callback=self._open_queue,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        x += _c.scaled(90) + gap
         self._ledger_btn = Button(
-            (8 + bw + 8 + 110 + 8 + 90 + 8 + 90 + 8, by, 90, bh),
+            (x, by, _c.scaled(90), bh),
             "≡ LEDGER",
             callback=self._open_ledger,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        x += _c.scaled(90) + gap
         self._help_btn = Button(
-            (8 + bw + 8 + 110 + 8 + 90 + 8 + 90 + 8 + 90 + 8, by, 70, bh),
+            (x, by, _c.scaled(70), bh),
             "? HELP",
             callback=self._open_help,
-            font_size=11,
+            font_size=_c.scaled(11),
         )
+        # Store the right edge of buttons for breadcrumb centering
+        self._btn_right = x + _c.scaled(70) + gap
 
     # ------------------------------------------------------------------
 
@@ -99,9 +104,9 @@ class TaskBar:
 
     def draw(self, surface: pygame.Surface) -> None:
         W = _c.WINDOW_WIDTH
-        bar = pygame.Rect(0, 0, W, TASKBAR_H)
+        bar = pygame.Rect(0, 0, W, _c.TASKBAR_H)
         pygame.draw.rect(surface, (10, 10, 28), bar)
-        pygame.draw.line(surface, C_BORDER, (0, TASKBAR_H - 1), (W, TASKBAR_H - 1))
+        pygame.draw.line(surface, C_BORDER, (0, _c.TASKBAR_H - 1), (W, _c.TASKBAR_H - 1))
 
         self._galaxy_btn.draw(surface)
         self._tech_btn.draw(surface)
@@ -113,10 +118,10 @@ class TaskBar:
         # Centre: current system / body breadcrumb
         label_text = self._build_label()
         if label_text:
-            btn_right = 8 + 120 + 8 + 110 + 8 + 90 + 8 + 90 + 8 + 90 + 8 + 70 + 16
-            usable_cx = btn_right + (W - _CLOCK_RESERVE - btn_right) // 2
-            lbl = font(13, bold=True).render(label_text, True, C_ACCENT)
-            surface.blit(lbl, lbl.get_rect(center=(usable_cx, TASKBAR_H // 2)))
+            clock_reserve = _c.scaled(280)
+            usable_cx = self._btn_right + (W - clock_reserve - self._btn_right) // 2
+            lbl = font(_c.scaled(13), bold=True).render(label_text, True, C_ACCENT)
+            surface.blit(lbl, lbl.get_rect(center=(usable_cx, _c.TASKBAR_H // 2)))
 
     # ------------------------------------------------------------------
 

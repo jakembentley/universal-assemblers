@@ -48,7 +48,10 @@ class Keybindings:
         return self._keys.get(action, _DEFAULTS.get(action, 0))
 
     def set(self, action: str, key_const: int) -> None:
-        """Remap an action to a new key."""
+        """Remap an action to a new key, clearing any existing binding for that key."""
+        for other_action, other_key in list(self._keys.items()):
+            if other_action != action and other_key == key_const:
+                del self._keys[other_action]
         self._keys[action] = key_const
 
     def reset_all(self) -> None:
@@ -67,9 +70,11 @@ class Keybindings:
                 data = json.load(f)
             kb = data.get("keybindings", {})
             for action, key_name in kb.items():
-                key_const = getattr(pygame, f"K_{key_name}", None)
-                if key_const is not None:
-                    self._keys[action] = key_const
+                try:
+                    key_const = pygame.key.key_code(key_name)
+                except ValueError:
+                    continue
+                self._keys[action] = key_const
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -82,11 +87,9 @@ class Keybindings:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
-        # pygame.key.name() returns e.g. "f5", "space"; strip and upper for K_ lookup
         kb: dict[str, str] = {}
         for action, key_const in self._keys.items():
-            name = pygame.key.name(key_const).upper()
-            kb[action] = name
+            kb[action] = pygame.key.name(key_const)
         data["keybindings"] = kb
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         with open(self._path, "w", encoding="utf-8") as f:

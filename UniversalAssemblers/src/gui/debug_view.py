@@ -41,7 +41,7 @@ class DebugView:
              _c.scaled(72), _c.scaled(22)),
             "✕  CLOSE",
             callback=self.deactivate,
-            font_size=_c.scaled(10),
+            font_size=int(_c.scaled(10)),
         )
 
     # ------------------------------------------------------------------
@@ -73,6 +73,16 @@ class DebugView:
     # Draw
 
     def draw(self, surface: pygame.Surface) -> None:
+        sw, sh = surface.get_size()
+        px = sw - self._panel_w - self._margin
+        py = sh - self._panel_h - self._margin
+        self._panel_rect = pygame.Rect(px, py, self._panel_w, self._panel_h)
+        self._close_btn.rect = pygame.Rect(
+            self._panel_rect.right - _c.scaled(80),
+            self._panel_rect.y + _c.scaled(4),
+            _c.scaled(72),
+            _c.scaled(22),
+        )
         r = self._panel_rect
 
         # Panel background

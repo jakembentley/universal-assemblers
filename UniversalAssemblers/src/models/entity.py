@@ -274,6 +274,32 @@ def compute_power_modifier(gs, body_id: str, plant_type_value: str) -> float:
 
 _DYSON_SPHERE_OUTPUT: float = 5000.0   # energy-units/yr per Dyson Sphere at system level
 
+# Cache: maps galaxy object id → {body_id: (system_obj, body_count_in_system)}
+_body_system_cache: dict[int, dict[str, tuple[object, int]]] = {}
+
+
+def _get_body_system_cache(galaxy) -> dict[str, tuple[object, int]]:
+    key = id(galaxy)
+    if key not in _body_system_cache:
+        cache: dict[str, tuple[object, int]] = {}
+        for sys in galaxy.solar_systems:
+            count = 0
+            for body in sys.orbital_bodies:
+                count += 1 + len(getattr(body, "moons", []))
+            for body in sys.orbital_bodies:
+                cache[body.id] = (sys, count)
+                for moon in getattr(body, "moons", []):
+                    cache[moon.id] = (sys, count)
+        _body_system_cache[key] = cache
+    return _body_system_cache[key]
+
+
+def invalidate_body_system_cache(galaxy=None) -> None:
+    if galaxy is None:
+        _body_system_cache.clear()
+    else:
+        _body_system_cache.pop(id(galaxy), None)
+
 
 def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
     """Return (production, consumption) energy-units/yr for a body.
@@ -304,23 +330,19 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
         elif inst.category == "bot":
             consumption += ENERGY_CONSUMPTION.get(inst.type_value, 0.0) * inst.count
 
-    # Dyson Sphere: system-level megastructure that energises every body
+    # Dyson Sphere: system-level megastructure — energy split evenly across all bodies
     galaxy = getattr(gs, "galaxy", None)
     if galaxy:
-        for sys in galaxy.solar_systems:
-            bodies = sys.orbital_bodies
-            if not any(b.id == body_id for b in bodies) and not any(
-                getattr(m, "id", None) == body_id
-                for b in bodies for m in getattr(b, "moons", [])
-            ):
-                continue
+        cache = _get_body_system_cache(galaxy)
+        entry = cache.get(body_id)
+        if entry is not None:
+            sys, body_count = entry
             dyson_count = sum(
                 i.count for i in roster.at(sys.id)
                 if i.category == "structure" and i.type_value == "dyson_sphere"
             )
             if dyson_count:
-                production += _DYSON_SPHERE_OUTPUT * dyson_count
-            break
+                production += (_DYSON_SPHERE_OUTPUT * dyson_count) / max(1, body_count)
 
     return production, consumption
 
