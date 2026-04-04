@@ -286,10 +286,14 @@ class EntityView:
                         color = (90, 120, 160)
                     items.append((f"{s.name}{dist_str}", s.id, color))
         elif self._type_value == "drop_ship" and self._system_id:
-            # Drop ships: any reachable (non-warp) discovered/colonized system; ETA by hop count
+            # Drop ships: current system (local drop) + any reachable discovered/colonized system
             from ..simulation import SHIP_SPEEDS
             spd = SHIP_SPEEDS.get("drop_ship", 0.20)
             items = []
+            # Add local system first so player can drop on uncolonized planets here
+            local_sys = next((s for s in galaxy.solar_systems if s.id == self._system_id), None)
+            if local_sys:
+                items.append((f"[Local Drop] {local_sys.name}", self._system_id, (60, 160, 80)))
             for s in galaxy.solar_systems:
                 if s.id == self._system_id or s.warp_only:
                     continue
@@ -334,8 +338,8 @@ class EntityView:
             return
         self._send_system_id = sys_id
         self._send_body_id   = None
-        # For mining_vessel and transport, rebuild body picker for chosen system
-        if self._type_value in ("mining_vessel", "transport"):
+        # Rebuild body picker for ships that need a specific landing body
+        if self._type_value in ("mining_vessel", "transport", "drop_ship"):
             self._rebuild_body_list(sys_id)
 
     def _on_send_body_select(self, body_id: str) -> None:
@@ -354,6 +358,11 @@ class EntityView:
         items: list[tuple[str, str, tuple | None]] = []
         for body in target_sys.orbital_bodies:
             if body.body_type == BodyType.STAR:
+                continue
+            # Drop ships can only land on planets/exoplanets
+            if self._type_value == "drop_ship" and body.body_type not in (
+                BodyType.PLANET, BodyType.EXOPLANET
+            ):
                 continue
             icon = {
                 BodyType.ASTEROID: "⬡ Asteroid",
@@ -679,11 +688,14 @@ class EntityView:
             # Player explicitly chose a body — use it
             target_body_id: str | None = self._send_body_id
         elif self._type_value == "drop_ship":
-            # Drop ship converts on a planet surface — first orbital body
-            target_body_id = (
-                target_sys.orbital_bodies[0].id
-                if target_sys and target_sys.orbital_bodies else None
-            )
+            if self._send_body_id:
+                target_body_id = self._send_body_id
+            else:
+                # Fall back to first orbital planet
+                target_body_id = (
+                    target_sys.orbital_bodies[0].id
+                    if target_sys and target_sys.orbital_bodies else None
+                )
         else:
             target_body_id = None
 
@@ -693,12 +705,15 @@ class EntityView:
         waypoints: list[str] = []
         if loc and self._send_system_id and loc != self._send_system_id:
             waypoints = gs.shortest_path(loc, self._send_system_id)
+        # Local drop: same system — mark progress complete so simulation converts on next tick
+        local_drop = (self._type_value == "drop_ship" and self._send_system_id == loc)
         order = ShipOrder(
             order_type="travel",
             target_system_id=self._send_system_id,
             target_body_id=target_body_id,
             travel_speed=speed,
             waypoints=waypoints,
+            progress=1.0 if local_drop else 0.0,
         )
         gs.order_queue.enqueue(loc, self._type_value, order)
         self._send_mode      = False
@@ -1673,8 +1688,8 @@ class EntityView:
                 self._sys_list.draw(surface)
                 cy += avail_h + 6
 
-                # Step 2 — Body selector (mining_vessel / transport only)
-                if self._send_system_id and self._type_value in ("mining_vessel", "transport"):
+                # Step 2 — Body selector (mining_vessel / transport / drop_ship)
+                if self._send_system_id and self._type_value in ("mining_vessel", "transport", "drop_ship"):
                     galaxy = self.app.galaxy
                     dest_name = self._send_system_id
                     if galaxy:
@@ -1698,8 +1713,9 @@ class EntityView:
 
                 # Dispatch button — show when system chosen (body optional for transport/mining)
                 if self._send_system_id:
-                    # For mining_vessel/transport: require body selection OR allow system-level
-                    needs_body = self._type_value in ("mining_vessel", "transport")
+                    # drop_ship local: require body selection; others: body optional
+                    drop_local = (self._type_value == "drop_ship" and self._send_system_id == loc)
+                    needs_body = self._type_value in ("mining_vessel", "transport") or drop_local
                     has_body   = bool(self._send_body_id)
                     can_dispatch = not needs_body or has_body
 
