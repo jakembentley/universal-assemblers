@@ -30,6 +30,7 @@ from .new_game_panel import NewGamePanel
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
+from ..keybindings import Keybindings
 
 
 DISPLAY_WINDOWED   = "windowed"
@@ -43,6 +44,13 @@ class App:
         pygame.init()
         pygame.key.set_repeat(400, 50)  # hold-to-repeat: 400ms delay, 50ms interval
         pygame.display.set_caption(TITLE)
+
+        # Load player keybindings from maps/settings.json (created on first save)
+        _settings_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "maps", "settings.json",
+        )
+        self.keybindings: Keybindings = Keybindings(_settings_path)
 
         # Detect native monitor resolution before creating the display
         info = pygame.display.Info()
@@ -745,18 +753,19 @@ class App:
                         elif self.state in ("galaxy", "system"):
                             self.pause_menu.activate()
                             self.game_clock.save_and_pause()
-                    if event.key == pygame.K_SPACE:
+                    if event.key == self.keybindings.key("toggle_pause"):
                         if self.state in ("galaxy", "system") and not self.pause_menu.is_active:
                             self.game_clock.toggle_pause()
-                    if event.key == pygame.K_F5:
+                    if event.key == self.keybindings.key("quick_save"):
                         if self.state in ("galaxy", "system") and self.game_state:
                             self.save_game()
                             now = pygame.time.get_ticks()
-                            self._notifications.append(("GAME SAVED  [F5]", now + 3000, (80, 220, 120)))
-                    if event.key == pygame.K_F9:
+                            key_name = pygame.key.name(self.keybindings.key("quick_save")).upper()
+                            self._notifications.append((f"GAME SAVED  [{key_name}]", now + 3000, (80, 220, 120)))
+                    if event.key == self.keybindings.key("quick_load"):
                         if self.state in ("galaxy", "system"):
                             self._quickload()
-                    if event.key == pygame.K_F12:
+                    if event.key == self.keybindings.key("debug_view"):
                         if self.debug_view.is_active:
                             self.close_debug_view()
                         else:
