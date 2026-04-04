@@ -242,7 +242,7 @@ _STRUCTURE_TYPES: frozenset[str] = frozenset({
     "extractor", "factory", "research_array", "shipyard", "storage_hub",
     "replicator", "power_plant_solar", "power_plant_wind", "power_plant_bios",
     "power_plant_fossil", "power_plant_nuclear", "power_plant_cold_fusion",
-    "power_plant_dark_matter",
+    "power_plant_dark_matter", "dyson_sphere",
 })
 
 
@@ -259,6 +259,7 @@ class SimulationEngine:
         events: list = []
         events.extend(self._tick_bios(dt_years))
         events.extend(self._tick_random_events(dt_years))
+        events.extend(self._tick_dyson_spheres(dt_years))
         events.extend(self._tick_power_plants(dt_years))
         events.extend(self._tick_research(dt_years))
         events.extend(self._tick_ships(dt_years))
@@ -639,6 +640,36 @@ class SimulationEngine:
                 return ev
 
         return None
+
+    def _tick_dyson_spheres(self, dt_years: float) -> list:
+        """Dyson Spheres gradually decay orbital planet resources over time."""
+        events: list = []
+        gs = self.gs
+        galaxy = gs.galaxy
+        if not galaxy:
+            return events
+        _DECAY_RATE = 0.5   # resource-units/yr per planet per Dyson Sphere
+
+        for sys in galaxy.solar_systems:
+            dyson_count = sum(
+                i.count for i in gs.entity_roster.at(sys.id)
+                if i.category == "structure" and i.type_value == "dyson_sphere"
+            )
+            if not dyson_count:
+                continue
+            for body in sys.orbital_bodies:
+                from .models.celestial import BodyType
+                if body.body_type == BodyType.STAR:
+                    continue
+                res = getattr(body, "resources", None)
+                if res is None:
+                    continue
+                decay = _DECAY_RATE * dyson_count * dt_years
+                for attr in ("minerals", "rare_minerals", "ice", "gas", "bios"):
+                    val = getattr(res, attr, 0.0)
+                    if val > 0:
+                        setattr(res, attr, max(0.0, val - decay))
+        return events
 
     def _tick_power_plants(self, dt_years: float) -> list:
         from .models.entity import POWER_PLANT_SPECS

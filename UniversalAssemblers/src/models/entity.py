@@ -195,6 +195,7 @@ BUILD_COSTS: dict[str, dict[str, float]] = {
     "shipyard":                {"minerals": 200, "rare_minerals": 50},
     "storage_hub":             {"minerals": 60,  "rare_minerals": 10},
     "replicator":              {"minerals": 300, "rare_minerals": 100},
+    "dyson_sphere":            {"minerals": 5000, "rare_minerals": 2000, "alloys": 1000, "components": 500},
     # Ships
     "probe":                   {"minerals": 40,  "rare_minerals": 15},
     "drop_ship":               {"minerals": 80,  "rare_minerals": 20},
@@ -271,8 +272,15 @@ def compute_power_modifier(gs, body_id: str, plant_type_value: str) -> float:
     return research_bonus
 
 
+_DYSON_SPHERE_OUTPUT: float = 5000.0   # energy-units/yr per Dyson Sphere at system level
+
+
 def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
-    """Return (production, consumption) energy-units/yr for a body."""
+    """Return (production, consumption) energy-units/yr for a body.
+
+    Dyson Spheres are placed at system level and contribute energy to every
+    body in their system equally.
+    """
     roster = gs.entity_roster
     production = 0.0
     consumption = 0.0
@@ -295,6 +303,25 @@ def compute_energy_balance(gs, body_id: str) -> tuple[float, float]:
             consumption += cons * inst.count
         elif inst.category == "bot":
             consumption += ENERGY_CONSUMPTION.get(inst.type_value, 0.0) * inst.count
+
+    # Dyson Sphere: system-level megastructure that energises every body
+    galaxy = getattr(gs, "galaxy", None)
+    if galaxy:
+        for sys in galaxy.solar_systems:
+            bodies = sys.orbital_bodies
+            if not any(b.id == body_id for b in bodies) and not any(
+                getattr(m, "id", None) == body_id
+                for b in bodies for m in getattr(b, "moons", [])
+            ):
+                continue
+            dyson_count = sum(
+                i.count for i in roster.at(sys.id)
+                if i.category == "structure" and i.type_value == "dyson_sphere"
+            )
+            if dyson_count:
+                production += _DYSON_SPHERE_OUTPUT * dyson_count
+            break
+
     return production, consumption
 
 

@@ -114,6 +114,7 @@ def _get_buildable_structures(gs) -> list[str]:
         "power_plant_cold_fusion": "cold_fusion",
         "power_plant_dark_matter": "dark_matter",
         "replicator": "self_replication",
+        "dyson_sphere": "swarm_bots",
     }
     for st, tech_id in gated.items():
         if tech_id in researched:
