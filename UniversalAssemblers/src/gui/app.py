@@ -27,10 +27,12 @@ from .help_view import HelpView
 from .debug_view import DebugView
 from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
+from .tutorial_overlay import TutorialOverlay
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
 from ..game_state import GameState
 from ..keybindings import Keybindings
+from ..tutorial import TutorialManager
 
 
 DISPLAY_WINDOWED   = "windowed"
@@ -85,9 +87,11 @@ class App:
         self.queue_view     = QueueView(self)
         self.ledger_view    = LedgerView(self)
         self.help_view      = HelpView(self)
-        self.tooltip        = Tooltip()
-        self.debug_view     = DebugView(self)
-        self.new_game_panel = NewGamePanel(self)
+        self.tooltip         = Tooltip()
+        self.debug_view      = DebugView(self)
+        self.new_game_panel  = NewGamePanel(self)
+        self.tutorial        = TutorialManager()
+        self.tutorial_overlay = TutorialOverlay(self)
 
         # Toast notifications: each entry is (message, expiry_ms, color)
         self._notifications: deque = deque(maxlen=5)
@@ -263,6 +267,12 @@ class App:
         self.game_view   = None       # lazily created on first enter_system
         self.game_clock  = GameClock()
         self.state       = "galaxy"
+
+        # Tutorial mode — enable if requested in settings
+        from ..tutorial import TutorialManager
+        self.tutorial = TutorialManager()
+        if settings.get("tutorial_mode", False):
+            self.tutorial.enabled = True
 
     def save_game(self, slot: int = -1) -> None:
         """Save game. slot=-1 → quicksave, slot=0-2 → autosave ring buffer."""
@@ -845,6 +855,12 @@ class App:
             if self.debug_view.is_active:
                 self.debug_view.handle_events(events)
                 self.debug_view.draw(self.screen)
+
+            # Tutorial overlay — shown during gameplay when tutorial mode is active
+            if self.state in ("galaxy", "system") and self.tutorial.enabled and not self.tutorial.complete:
+                self.tutorial.tick(self.game_state)
+                self.tutorial_overlay.handle_events(events)
+                self.tutorial_overlay.draw(self.screen)
 
             # Tooltip — drawn last so it appears above everything
             self.tooltip.draw(self.screen)

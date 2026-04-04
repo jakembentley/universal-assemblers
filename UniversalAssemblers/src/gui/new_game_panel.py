@@ -97,6 +97,10 @@ class NewGamePanel:
         self._warp_dec_rect = pygame.Rect(0, 0, 28, 28)
         self._warp_inc_rect = pygame.Rect(0, 0, 28, 28)
 
+        # Tutorial mode toggle
+        self._tutorial_mode: bool = False
+        self._tutorial_rect: pygame.Rect = pygame.Rect(0, 0, 140, 26)
+
         # Buttons
         self._start_btn = Button(
             (px + self._PANEL_W // 2 - 90, py + self._PANEL_H - 60, 170, 36),
@@ -143,6 +147,7 @@ class NewGamePanel:
             "bio_uplift_rate":   self._bio_uplift.selected.lower(),
             "body_distribution": self._body_mix.selected.lower().replace("-", "_").replace(" ", "_"),
             "warp_clusters":     self._warp_clusters,
+            "tutorial_mode":     self._tutorial_mode,
         }
         self.app.launch_game(settings)
 
@@ -166,12 +171,14 @@ class NewGamePanel:
             self._start_btn.handle_event(event)
             self._back_btn.handle_event(event)
 
-            # Warp clusters +/-
+            # Warp clusters +/- and tutorial toggle
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self._warp_dec_rect.collidepoint(event.pos):
                     self._warp_clusters = max(0, self._warp_clusters - 1)
                 elif self._warp_inc_rect.collidepoint(event.pos):
                     self._warp_clusters = min(3, self._warp_clusters + 1)
+                elif self._tutorial_rect.collidepoint(event.pos):
+                    self._tutorial_mode = not self._tutorial_mode
 
     # ------------------------------------------------------------------
     # Draw
@@ -242,6 +249,20 @@ class NewGamePanel:
 
         warp_note = font(11).render("(isolated systems requiring Warp Drive)", True, C_TEXT_DIM)
         surface.blit(warp_note, (col_x + 120, row_y + 6))
+        row_y += 44
+
+        # Tutorial Mode toggle
+        _row_label("Tutorial Mode:", row_y)
+        self._tutorial_rect = pygame.Rect(col_x, row_y, 140, 26)
+        tut_bg  = (0, 100, 60) if self._tutorial_mode else C_BTN
+        tut_lbl = "ON  ✓" if self._tutorial_mode else "OFF"
+        tut_col = (180, 255, 200) if self._tutorial_mode else C_BTN_TXT
+        pygame.draw.rect(surface, tut_bg, self._tutorial_rect, border_radius=4)
+        pygame.draw.rect(surface, C_BORDER, self._tutorial_rect, 1, border_radius=4)
+        tut_s = font(12, bold=self._tutorial_mode).render(tut_lbl, True, tut_col)
+        surface.blit(tut_s, tut_s.get_rect(center=self._tutorial_rect.center))
+        tut_hint = font(10).render("Step-by-step guidance for new players", True, C_TEXT_DIM)
+        surface.blit(tut_hint, (col_x + 148, row_y + 6))
 
         # Buttons
         self._start_btn.draw(surface)
