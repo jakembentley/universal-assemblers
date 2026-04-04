@@ -10,17 +10,12 @@ Follows the activate()/deactivate() protocol used by all other overlays.
 from __future__ import annotations
 
 import pygame
+from . import constants as _c
 from .constants import (
-    HEADER_H, PADDING,
-    C_BG, C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
-    C_WARN, C_BTN_TXT,
-    font,
+    C_BORDER, C_HEADER, C_TEXT, C_TEXT_DIM, C_ACCENT,
+    HEADER_H, PADDING, font,
 )
 from .widgets import Button
-
-_PANEL_W = 420
-_PANEL_H = 360
-_PANEL_MARGIN = 8
 
 
 class DebugView:
@@ -31,17 +26,22 @@ class DebugView:
         self.is_active = False
         self._scroll_y: int = 0
 
-        # Anchor panel 8 px from bottom-right
+        self._panel_w  = _c.scaled(420)
+        self._panel_h  = _c.scaled(360)
+        self._margin   = _c.scaled(8)
+
+        # Anchor panel from bottom-right
         sw, sh = app.screen.get_size()
-        px = sw - _PANEL_W - _PANEL_MARGIN
-        py = sh - _PANEL_H - _PANEL_MARGIN
-        self._panel_rect = pygame.Rect(px, py, _PANEL_W, _PANEL_H)
+        px = sw - self._panel_w - self._margin
+        py = sh - self._panel_h - self._margin
+        self._panel_rect = pygame.Rect(px, py, self._panel_w, self._panel_h)
 
         self._close_btn = Button(
-            (self._panel_rect.right - 80, self._panel_rect.y + 4, 72, 22),
+            (self._panel_rect.right - _c.scaled(80), self._panel_rect.y + _c.scaled(4),
+             _c.scaled(72), _c.scaled(22)),
             "✕  CLOSE",
             callback=self.deactivate,
-            font_size=10,
+            font_size=_c.scaled(10),
         )
 
     # ------------------------------------------------------------------

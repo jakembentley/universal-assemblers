@@ -2107,6 +2107,93 @@ except Exception as e:
     fail("capability guard skips miskeyed task (exception)", f"unexpected exception: {e}")
 
 
+# ─── Enforcer bot ─────────────────────────────────────────────────────────────
+section("Enforcer bot")
+
+from src.models.entity import BotType, BUILD_COSTS, ENERGY_CONSUMPTION
+from src.simulation import SimulationEngine
+
+# 1. BotType.ENFORCER enum value
+try:
+    assert BotType.ENFORCER == "enforcer", \
+        f"BotType.ENFORCER should equal 'enforcer', got {BotType.ENFORCER!r}"
+    ok("BotType.ENFORCER == 'enforcer'")
+except AssertionError as e:
+    fail("BotType.ENFORCER value", str(e))
+except Exception as e:
+    fail("BotType.ENFORCER value", f"unexpected exception: {e}")
+
+# 2. BUILD_COSTS contains enforcer with rare_minerals
+try:
+    assert "enforcer" in BUILD_COSTS, \
+        "'enforcer' should be a key in BUILD_COSTS"
+    assert "rare_minerals" in BUILD_COSTS["enforcer"], \
+        "enforcer BUILD_COSTS entry should include rare_minerals"
+    assert BUILD_COSTS["enforcer"]["rare_minerals"] > 0, \
+        f"enforcer rare_minerals cost should be > 0, got {BUILD_COSTS['enforcer']['rare_minerals']}"
+    ok("'enforcer' in BUILD_COSTS with rare_minerals cost")
+except AssertionError as e:
+    fail("enforcer BUILD_COSTS rare_minerals", str(e))
+except Exception as e:
+    fail("enforcer BUILD_COSTS rare_minerals", f"unexpected exception: {e}")
+
+# 3. ENERGY_CONSUMPTION contains enforcer
+try:
+    assert "enforcer" in ENERGY_CONSUMPTION, \
+        "'enforcer' should be a key in ENERGY_CONSUMPTION"
+    assert ENERGY_CONSUMPTION["enforcer"] > 0, \
+        f"enforcer energy consumption should be > 0, got {ENERGY_CONSUMPTION['enforcer']}"
+    ok(f"'enforcer' in ENERGY_CONSUMPTION (value={ENERGY_CONSUMPTION['enforcer']})")
+except AssertionError as e:
+    fail("enforcer ENERGY_CONSUMPTION", str(e))
+except Exception as e:
+    fail("enforcer ENERGY_CONSUMPTION", f"unexpected exception: {e}")
+
+# 4. _BOT_TASK_CAPABILITIES includes enforcer -> {"defend"}
+try:
+    import src.simulation as _sim_mod
+    caps = _sim_mod._BOT_TASK_CAPABILITIES
+    assert "enforcer" in caps, \
+        "'enforcer' should be in _BOT_TASK_CAPABILITIES"
+    assert "defend" in caps["enforcer"], \
+        f"enforcer capabilities should include 'defend', got {caps['enforcer']!r}"
+    ok("enforcer has 'defend' in _BOT_TASK_CAPABILITIES")
+except AssertionError as e:
+    fail("enforcer _BOT_TASK_CAPABILITIES", str(e))
+except Exception as e:
+    fail("enforcer _BOT_TASK_CAPABILITIES", f"unexpected exception: {e}")
+
+# 5. defend task for enforcer is not rejected by the capability guard (no crash)
+try:
+    gs_enf = _fresh_gs()
+    _enf_body = gs_enf.galaxy.solar_systems[0].orbital_bodies[0].id
+    gs_enf.entity_roster.add("bot", "enforcer", _enf_body, 2)
+    defend_task = BotTask(
+        task_type="defend",
+        resource=None,
+        entity_type=None,
+        target_amount=0,
+        allocation=100,
+    )
+    gs_enf.bot_tasks.add(_enf_body, "enforcer", defend_task)
+    # _tick_bot_tasks should not raise; defend is a valid capability so the guard passes
+    gs_enf.sim_engine._tick_bot_tasks(1.0)
+    ok("defend task for enforcer passes capability guard without crashing")
+except Exception as e:
+    fail("defend task capability guard", f"unexpected exception: {e}")
+
+# 6. enforcer is in _BUILD_BOTS list in entity_view
+try:
+    import src.gui.entity_view as _ev_mod
+    assert "enforcer" in _ev_mod._BUILD_BOTS, \
+        f"'enforcer' should be in _BUILD_BOTS, got {_ev_mod._BUILD_BOTS!r}"
+    ok("'enforcer' present in entity_view._BUILD_BOTS")
+except AssertionError as e:
+    fail("enforcer in _BUILD_BOTS", str(e))
+except Exception as e:
+    fail("enforcer in _BUILD_BOTS", f"unexpected exception: {e}")
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")
