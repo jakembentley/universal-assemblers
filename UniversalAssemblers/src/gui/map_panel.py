@@ -40,6 +40,11 @@ class MapPanel:
         self._mode = "system"    # "system" | "planet"
         self._zoom_body_id: str | None = None
 
+        # Scroll-wheel zoom (system view only)
+        self._map_zoom: float = 1.0
+        _ZOOM_MIN: float = 0.3
+        _ZOOM_MAX: float = 3.0
+
         # Stable per-body angles (seed from body id hash)
         self._body_angles: dict[str, float] = {}
 
@@ -97,6 +102,11 @@ class MapPanel:
 
             if self._mode == "planet":
                 self._back_btn.handle_event(event)
+
+            if event.type == pygame.MOUSEWHEEL and self.rect.collidepoint(pygame.mouse.get_pos()):
+                factor = 1.15 if event.y > 0 else (1 / 1.15)
+                self._map_zoom = max(0.3, min(3.0, self._map_zoom * factor))
+                continue
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.rect.collidepoint(event.pos):
@@ -208,8 +218,8 @@ class MapPanel:
 
         t = time.time() * 0.5   # global time, halved for slower orbits
 
-        # Scale: fit the 5 AU zone comfortably, compress outer orbits
-        max_r_px = min(_c.MAP_W, _c.TOP_H) * 0.44
+        # Scale: fit the 5 AU zone comfortably, compress outer orbits; scroll-wheel zoom applied
+        max_r_px = min(_c.MAP_W, _c.TOP_H) * 0.44 * self._map_zoom
 
         gs = self.app.game_state
         is_probed = gs.is_probed(system.id) if gs else False
@@ -663,3 +673,4 @@ class MapPanel:
         self._mode = "system"
         self._zoom_body_id = None
         self._body_angles  = {}
+        self._map_zoom     = 1.0
