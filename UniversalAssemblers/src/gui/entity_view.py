@@ -152,6 +152,12 @@ class EntityView:
         # Hit rects populated each draw: (rect, action, data)
         self._hit_rects: list[tuple[pygame.Rect, str, object]] = []
 
+        # --- Inline allocation editing state ---
+        self._alloc_editing:      bool       = False
+        self._alloc_edit_task_id: object     = None  # task_id being edited
+        self._alloc_edit_buffer:  str        = ""
+        self._alloc_edit_factory: bool       = False  # True = factory task, False = bot task
+
         # --- Ship send-to UI state ---
         self._send_mode:      bool       = False
         self._send_system_id: str | None = None
@@ -409,6 +415,20 @@ class EntityView:
 
     def handle_events(self, events: list[pygame.event.Event]) -> None:
         for event in events:
+            # Intercept keyboard input when inline allocation editing is active
+            if self._alloc_editing and event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                    self._commit_alloc_edit()
+                elif event.key == pygame.K_ESCAPE:
+                    self._alloc_editing = False
+                    self._alloc_edit_buffer = ""
+                elif event.key == pygame.K_BACKSPACE:
+                    self._alloc_edit_buffer = self._alloc_edit_buffer[:-1]
+                elif event.unicode.isdigit():
+                    if len(self._alloc_edit_buffer) < 3:
+                        self._alloc_edit_buffer += event.unicode
+                continue
+
             self._close_btn.handle_event(event)
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
@@ -460,6 +480,12 @@ class EntityView:
                 elif action == "factory_alloc_inc":
                     task_id, loc = data
                     gs.factory_tasks.adjust_allocation(loc, task_id, +10)
+                elif action == "factory_alloc_edit":
+                    task_id, current_alloc = data
+                    self._alloc_editing = True
+                    self._alloc_edit_task_id = task_id
+                    self._alloc_edit_buffer = str(current_alloc)
+                    self._alloc_edit_factory = True
                 elif action == "factory_remove":
                     task_id, loc = data
                     gs.factory_tasks.remove(loc, task_id)
@@ -505,6 +531,30 @@ class EntityView:
                     task_id, loc = data
                     gs.shipyard_tasks.remove(loc, task_id)
                 return
+
+    def _commit_alloc_edit(self) -> None:
+        """Apply the typed allocation value to the currently-edited task."""
+        gs = self.app.game_state
+        if not gs or not self._alloc_edit_buffer:
+            self._alloc_editing = False
+            return
+        new_val = max(0, min(100, int(self._alloc_edit_buffer)))
+        loc = self._body_id or self._system_id or ""
+        task_id = self._alloc_edit_task_id
+        if self._alloc_edit_factory:
+            task = next((t for t in gs.factory_tasks.get(loc) if t.task_id == task_id), None)
+            if task:
+                delta = new_val - task.allocation
+                gs.factory_tasks.adjust_allocation(loc, str(task_id), delta)
+        else:
+            task = next(
+                (t for t in gs.bot_tasks.get(loc, self._type_value) if t.task_id == task_id), None
+            )
+            if task:
+                delta = new_val - task.allocation
+                gs.bot_tasks.adjust_allocation(loc, self._type_value, str(task_id), delta)
+        self._alloc_editing = False
+        self._alloc_edit_buffer = ""
 
     def _handle_bot_events(self, event: pygame.event.Event) -> None:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -617,6 +667,13 @@ class EntityView:
         elif action == "alloc_dec":
             task_id, _ = data  # type: ignore
             gs.bot_tasks.adjust_allocation(loc, self._type_value, str(task_id), -10)
+
+        elif action == "alloc_edit_start":
+            task_id, current_alloc = data  # type: ignore
+            self._alloc_editing = True
+            self._alloc_edit_task_id = task_id
+            self._alloc_edit_buffer = str(current_alloc)
+            self._alloc_edit_factory = False
 
     def _handle_ship_events(self, event: pygame.event.Event) -> None:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -920,15 +977,28 @@ class EntityView:
                 if prog_frac > 0:
                     pygame.draw.rect(surface, (80, 200, 255), pygame.Rect(cx + 6, cy + 32, int(180 * prog_frac), 4))
                 # Allocation controls
-                ax = tr.right - 110
+                ax = tr.right - 116
                 dec_r = pygame.Rect(ax, cy + 8, 22, 22)
-                inc_r = pygame.Rect(ax + 50, cy + 8, 22, 22)
-                alloc_s2 = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                inc_r = pygame.Rect(ax + 62, cy + 8, 22, 22)
                 pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
                 pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
                 surface.blit(_c.font_scaled(13, bold=True).render("−", True, C_BTN_TXT), (dec_r.x + 5, dec_r.y + 2))
                 surface.blit(_c.font_scaled(13, bold=True).render("+", True, C_BTN_TXT), (inc_r.x + 5, inc_r.y + 2))
-                surface.blit(alloc_s2, (ax + 26, cy + 10))
+                editing_fac = (
+                    self._alloc_editing
+                    and self._alloc_edit_factory
+                    and self._alloc_edit_task_id == task.task_id
+                )
+                alloc_r2 = pygame.Rect(ax + 25, cy + 8, 34, 22)
+                pygame.draw.rect(surface, (20, 40, 70), alloc_r2, border_radius=3)
+                if editing_fac:
+                    pygame.draw.rect(surface, C_ACCENT, alloc_r2, 1, border_radius=3)
+                    buf_s2 = _c.font_scaled(12, bold=True).render(self._alloc_edit_buffer + "|", True, C_ACCENT)
+                    surface.blit(buf_s2, buf_s2.get_rect(center=alloc_r2.center))
+                else:
+                    alloc_s2 = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                    surface.blit(alloc_s2, alloc_s2.get_rect(center=alloc_r2.center))
+                    self._hit_rects.append((alloc_r2, "factory_alloc_edit", (task.task_id, task.allocation)))
                 self._hit_rects.append((dec_r, "factory_alloc_dec", (task.task_id, loc or "")))
                 self._hit_rects.append((inc_r, "factory_alloc_inc", (task.task_id, loc or "")))
                 rm_r = pygame.Rect(tr.right - 26, cy + 8, 22, 22)
@@ -1275,11 +1345,28 @@ class EntityView:
 
                 # Allocation controls
                 alloc_x = task_r.right - 120
-                alloc_s = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
-                surface.blit(alloc_s, (alloc_x + 24, cy + 10))
+                editing_this = (
+                    self._alloc_editing
+                    and not self._alloc_edit_factory
+                    and self._alloc_edit_task_id == task.task_id
+                )
+                if editing_this:
+                    # Inline text input box
+                    edit_r = pygame.Rect(alloc_x + 4, cy + 8, 54, 22)
+                    pygame.draw.rect(surface, (20, 40, 70), edit_r, border_radius=3)
+                    pygame.draw.rect(surface, C_ACCENT, edit_r, 1, border_radius=3)
+                    buf_txt = self._alloc_edit_buffer + "|"
+                    buf_s = _c.font_scaled(12, bold=True).render(buf_txt, True, C_ACCENT)
+                    surface.blit(buf_s, buf_s.get_rect(center=edit_r.center))
+                else:
+                    alloc_r = pygame.Rect(alloc_x + 4, cy + 8, 54, 22)
+                    pygame.draw.rect(surface, (20, 40, 70), alloc_r, border_radius=3)
+                    alloc_s = _c.font_scaled(12, bold=True).render(f"{task.allocation}%", True, C_SELECTED)
+                    surface.blit(alloc_s, alloc_s.get_rect(center=alloc_r.center))
+                    self._hit_rects.append((alloc_r, "alloc_edit_start", (task.task_id, task.allocation)))
 
                 dec_r = pygame.Rect(alloc_x, cy + 8, 22, 22)
-                inc_r = pygame.Rect(alloc_x + 56, cy + 8, 22, 22)
+                inc_r = pygame.Rect(alloc_x + 62, cy + 8, 22, 22)
                 pygame.draw.rect(surface, C_BTN, dec_r, border_radius=3)
                 pygame.draw.rect(surface, C_BTN, inc_r, border_radius=3)
                 surface.blit(_c.font_scaled(13, bold=True).render("−", True, C_BTN_TXT),
