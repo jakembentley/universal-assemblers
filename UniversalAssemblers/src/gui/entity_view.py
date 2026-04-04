@@ -1402,14 +1402,25 @@ class EntityView:
         # Resource / entity type selector
         if self._add_task_type == "mine" or self._add_task_type == "transport":
             for i, res in enumerate(_MINE_RESOURCES):
+                # Bios requires a Harvester bot — disable for other bot types
+                bios_locked = (res == "bios" and self._type_value != "harvester")
                 rr = pygame.Rect(fx + (i % 3) * 90, fy + (i // 3) * 26, 82, 22)
-                sel = self._add_task_res == res
-                pygame.draw.rect(surface, C_ACCENT if sel else C_BTN, rr, border_radius=3)
-                rlbl = _c.font_scaled(10, bold=True).render(
-                    _MINE_RES_LABELS[res], True, (0, 0, 0) if sel else C_BTN_TXT
-                )
+                sel = self._add_task_res == res and not bios_locked
+                if bios_locked:
+                    btn_col = (30, 30, 30)
+                    txt_col = (70, 70, 70)
+                elif sel:
+                    btn_col = C_ACCENT
+                    txt_col = (0, 0, 0)
+                else:
+                    btn_col = C_BTN
+                    txt_col = C_BTN_TXT
+                pygame.draw.rect(surface, btn_col, rr, border_radius=3)
+                label = _MINE_RES_LABELS[res] + (" [H]" if bios_locked else "")
+                rlbl = _c.font_scaled(10, bold=True).render(label, True, txt_col)
                 surface.blit(rlbl, rlbl.get_rect(center=rr.center))
-                self._hit_rects.append((rr, "set_res", res))
+                if not bios_locked:
+                    self._hit_rects.append((rr, "set_res", res))
             fy += ((len(_MINE_RESOURCES) - 1) // 3 + 1) * 26 + 4
 
             # For transport: show destination body selector
@@ -1495,12 +1506,23 @@ class EntityView:
         self._hit_rects.append((rep_r, "toggle_repeat", None))
         fy += 28
 
-        # Confirm button
+        # Confirm button — disabled when bios selected for non-harvester
+        bios_blocked = (
+            self._add_task_type == "mine"
+            and self._add_task_res == "bios"
+            and self._type_value != "harvester"
+        )
         conf_r = pygame.Rect(fx, fy, 100, 24)
-        pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
-        conf_lbl = _c.font_scaled(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+        conf_bg  = (60, 60, 60) if bios_blocked else (0, 120, 80)
+        conf_fg  = (120, 120, 120) if bios_blocked else (200, 255, 220)
+        pygame.draw.rect(surface, conf_bg, conf_r, border_radius=4)
+        conf_lbl = _c.font_scaled(12, bold=True).render("CONFIRM", True, conf_fg)
         surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
-        self._hit_rects.append((conf_r, "confirm_add_task", None))
+        if not bios_blocked:
+            self._hit_rects.append((conf_r, "confirm_add_task", None))
+        if bios_blocked:
+            note = _c.font_scaled(9).render("Harvester only", True, (160, 80, 80))
+            surface.blit(note, (fx + 106, fy + 6))
 
         return fy + 32
 
