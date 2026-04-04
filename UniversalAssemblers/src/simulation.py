@@ -426,11 +426,17 @@ class SimulationEngine:
                 return rng.choice(candidates)
         return None
 
+    # Random events are suppressed for this many in-game years after a new game
+    # starts, giving players time to establish a foothold before disasters strike.
+    _EVENT_GRACE_YEARS = 5.0
+
     def _tick_random_events(self, dt_years: float) -> list:
         """Roll random events across all player-occupied bodies and systems."""
         events: list = []
         galaxy = self.gs.galaxy
         if not galaxy:
+            return events
+        if self.gs.in_game_years < self._EVENT_GRACE_YEARS:
             return events
 
         body_map: dict[str, object] = {}
@@ -477,7 +483,7 @@ class SimulationEngine:
         roster = self.gs.entity_roster
 
         ships_here = [i for i in roster.at(sys_id) if i.category == "ship" and i.count > 0]
-        if ships_here and rng.random() < 0.08 * dt_years:
+        if ships_here and rng.random() < 0.04 * dt_years:
             target = rng.choice(ships_here)
             dmg = rng.randint(20, 50)
             destroyed = self.gs.apply_damage(sys_id, "ship", target.type_value, dmg)
@@ -510,7 +516,7 @@ class SimulationEngine:
         uplifted_bio  = bio_pop if (bio_pop and bio_pop.bio_type == BioType.UPLIFTED) else None
 
         # Asteroid impact
-        if structures and rng.random() < 0.04 * dt_years:
+        if structures and rng.random() < 0.02 * dt_years:
             target = rng.choice(structures)
             destroyed = gs.apply_damage(body_id, "structure", target.type_value, 100)
             return {
@@ -522,7 +528,7 @@ class SimulationEngine:
             }
 
         # Factory malfunction
-        if factories and rng.random() < 0.06 * dt_years:
+        if factories and rng.random() < 0.03 * dt_years:
             dmg = rng.randint(15, 40)
             destroyed = gs.apply_damage(body_id, "structure", "factory", dmg)
             return {
@@ -534,7 +540,7 @@ class SimulationEngine:
             }
 
         # Power surge
-        if power_plants and rng.random() < 0.05 * dt_years:
+        if power_plants and rng.random() < 0.025 * dt_years:
             target = rng.choice(power_plants)
             dmg = rng.randint(20, 50)
             destroyed = gs.apply_damage(body_id, "structure", target.type_value, dmg)
