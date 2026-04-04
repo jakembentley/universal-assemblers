@@ -49,6 +49,7 @@ class BotType(str, Enum):
     HARVESTER    = "harvester"
     MINER        = "miner"
     CONSTRUCTOR  = "constructor"
+    ENFORCER     = "enforcer"      # defends player entities on the same planet
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +203,7 @@ BUILD_COSTS: dict[str, dict[str, float]] = {
     "constructor":             {"minerals": 20,  "rare_minerals": 5},
     "logistic_bot":            {"minerals": 15,  "rare_minerals": 2},
     "harvester":               {"minerals": 25,  "rare_minerals": 5},
+    "enforcer":                {"minerals": 40,  "rare_minerals": 15},
 }
 
 
@@ -221,6 +223,7 @@ ENERGY_CONSUMPTION: dict[str, float] = {
     "constructor":              5.0,
     "logistic_bot":             3.0,
     "harvester":                4.0,
+    "enforcer":                 8.0,
 }
 
 

@@ -56,6 +56,7 @@ _BOT_NAMES: dict[str, str] = {
     "harvester":    "Harvester Bot",
     "miner":        "Miner Bot",
     "constructor":  "Constructor Bot",
+    "enforcer":     "Enforcer Bot",
 }
 
 _SHIP_NAMES: dict[str, str] = {
@@ -71,6 +72,7 @@ _TASK_TYPE_LABELS: dict[str, str] = {
     "build":     "Build",
     "transport": "Transport",
     "repair":    "Repair",
+    "defend":    "Defend",
 }
 
 _MINE_RESOURCES = ["minerals", "rare_minerals", "ice", "gas", "bios"]
@@ -89,6 +91,7 @@ _BOT_ALLOWED_TASKS: dict[str, list[str]] = {
     "harvester":    ["mine"],
     "constructor":  ["build"],
     "logistic_bot": ["transport", "repair"],
+    "enforcer":     ["defend"],
 }
 
 # Buildable entity types for constructor tasks (no tech requirement)
@@ -97,7 +100,7 @@ _BUILD_STRUCTURES_BASE = [
     "power_plant_solar", "power_plant_wind", "power_plant_bios",
     "power_plant_fossil", "power_plant_nuclear", "shipyard", "storage_hub",
 ]
-_BUILD_BOTS = ["miner", "constructor", "logistic_bot", "harvester"]
+_BUILD_BOTS = ["miner", "constructor", "logistic_bot", "harvester", "enforcer"]
 _BUILD_SHIPS = ["probe", "drop_ship"]
 
 
@@ -642,6 +645,14 @@ class EntityView:
                     resource=self._add_task_res or "structure",
                     entity_type=None,
                     target_amount=0,
+                )
+            elif self._add_task_type == "defend":
+                task = BotTask(
+                    task_type="defend",
+                    resource=None,
+                    entity_type=None,
+                    target_amount=0,
+                    repeat=True,  # Defend is always continuous
                 )
             else:
                 task = BotTask(
@@ -1446,7 +1457,7 @@ class EntityView:
 
         # Task type toggle — only shown if the bot can do more than one type
         if len(allowed_types) > 1:
-            all_types = [("mine", "Mine"), ("build", "Build"), ("transport", "Transport"), ("repair", "Repair")]
+            all_types = [("mine", "Mine"), ("build", "Build"), ("transport", "Transport"), ("repair", "Repair"), ("defend", "Defend")]
             for i, (ttype, tlabel) in enumerate(
                 t for t in all_types if t[0] in allowed_types
             ):
@@ -1502,6 +1513,21 @@ class EntityView:
             return fy + 32
 
         # Resource / entity type selector
+        # Defend task (passive — no resource or amount needed, just confirm)
+        if self._add_task_type == "defend":
+            desc_s = _c.font_scaled(11).render(
+                "Enforcers will intercept bios attacks at this location.",
+                True, (160, 200, 160),
+            )
+            surface.blit(desc_s, (fx, fy))
+            fy += 18
+            conf_r = pygame.Rect(fx, fy, 100, 24)
+            pygame.draw.rect(surface, (0, 120, 80), conf_r, border_radius=4)
+            conf_lbl = _c.font_scaled(12, bold=True).render("CONFIRM", True, (200, 255, 220))
+            surface.blit(conf_lbl, conf_lbl.get_rect(center=conf_r.center))
+            self._hit_rects.append((conf_r, "confirm_add_task", None))
+            return fy + 32
+
         if self._add_task_type == "mine" or self._add_task_type == "transport":
             for i, res in enumerate(_MINE_RESOURCES):
                 # Bios requires a Harvester bot — disable for other bot types

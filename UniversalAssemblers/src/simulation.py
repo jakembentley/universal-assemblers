@@ -226,7 +226,11 @@ _BOT_TASK_CAPABILITIES: dict[str, set[str]] = {
     "harvester":    {"mine"},
     "constructor":  {"build"},
     "logistic_bot": {"transport", "repair"},
+    "enforcer":     {"defend"},
 }
+
+# Enforcer: damage reduction per bot per year at 100% allocation
+_ENFORCER_INTERCEPT_CHANCE: float = 0.30   # per enforcer, per attack event
 
 # Ship type_values that constructors can build
 _SHIP_TYPES: frozenset[str] = frozenset({
@@ -383,6 +387,25 @@ class SimulationEngine:
                 damage_chance = pop.aggression * 0.08 * dt_years
                 if rng.random() < damage_chance:
                     all_entities = self.gs.entity_roster.at(pop.body_id)
+                    # Enforcer bots intercept attacks — each enforcer at this body has a
+                    # chance to block the attack entirely
+                    enforcer_count = next(
+                        (e.count for e in all_entities
+                         if e.category == "bot" and e.type_value == "enforcer"),
+                        0,
+                    )
+                    intercepted = any(
+                        rng.random() < _ENFORCER_INTERCEPT_CHANCE
+                        for _ in range(enforcer_count)
+                    )
+                    if intercepted:
+                        events.append({
+                            "type":        "enforcer_intercept",
+                            "body_id":     pop.body_id,
+                            "system_id":   body_to_system.get(pop.body_id, ""),
+                            "enforcers":   enforcer_count,
+                        })
+                        continue
                     target = self._pick_bio_attack_target(all_entities, rng)
                     if target:
                         dmg = int(rng.randint(10, 30) * min(2.0, pop.population / 1000.0))
@@ -953,6 +976,9 @@ class SimulationEngine:
                             gs.repair_damage(best_key[0], best_key[1], best_key[2], repair_amount)
                             if repair_amount >= 10:
                                 events.append({"type": "entity_repaired", "location": loc_id, "category": target_cat})
+
+                elif task.task_type == "defend":
+                    pass  # Passive — effect applied in _tick_bios via enforcer intercept
 
                 elif task.task_type == "build":
                     rate           = _BUILD_RATES.get(bot_type, 0.25)

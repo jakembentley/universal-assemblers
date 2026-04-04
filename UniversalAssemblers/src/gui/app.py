@@ -542,6 +542,11 @@ class App:
                                     loc_name = moon.name
                 msg = f"⚡ {plant_type} offline — fuel depleted at {loc_name}"
                 col = (255, 160, 40)
+            elif etype == "enforcer_intercept":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                n   = ev.get("enforcers", 1)
+                msg = f"ENFORCER: bios attack intercepted at {loc} ({n} enforcer{'s' if n != 1 else ''})"
+                col = (80, 200, 120)
             elif etype in ("bios_entity_damaged", "bios_entity_destroyed"):
                 loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
                 ent = (ev.get("entity_type") or "entity").replace("_", " ").title()
