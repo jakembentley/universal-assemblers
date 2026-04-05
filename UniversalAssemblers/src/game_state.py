@@ -149,6 +149,21 @@ class BotTaskList:
 
 
 # ---------------------------------------------------------------------------
+# Pending events (player-facing warnings with choice resolution)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PendingEvent:
+    """A forewarned event that the player can respond to before it fires."""
+    event_id:             str        # uuid4 hex
+    event_type:           str        # "asteroid_incoming" | "solar_flare_warning" | "bios_attack_imminent"
+    payload:              dict       # body_id, system_id, damage, entity_type, etc.
+    warn_years_remaining: float
+    choices:              list       # [{"key": str, "label": str, "cost": dict, "effect": str}]
+    chosen:               str | None = None   # None = unresolved
+
+
+# ---------------------------------------------------------------------------
 # Factory tasks
 # ---------------------------------------------------------------------------
 
@@ -513,6 +528,8 @@ class GameState:
         self.home_body_id: str = ""
         self.tick_count: int = 0
         self._debug_event_log: deque = deque(maxlen=30)
+        self.pending_events: list = []   # list[PendingEvent]
+        self.threat_levels: dict = {"bios": 0.0, "environmental": 0.0, "resources": 0.0}
 
     # ------------------------------------------------------------------
     # Factory
@@ -622,6 +639,69 @@ class GameState:
                     }
 
     # ------------------------------------------------------------------
+    # Pending events
+
+    def resolve_pending_event(self, event_id: str, choice_key: str) -> None:
+        """Mark a pending event as resolved with the player's chosen response."""
+        for pe in self.pending_events:
+            if pe.event_id == event_id:
+                pe.chosen = choice_key
+                return
+
+    def resolve_goal(self, goal_id: str) -> None:
+        """Award resource bonus and fire a goal_completed sim event."""
+        # Resource bonus — add to home body if available
+        if self.galaxy and self.home_body_id:
+            for sys in self.galaxy.solar_systems:
+                for body in sys.orbital_bodies:
+                    if body.id == self.home_body_id:
+                        body.resources.minerals = getattr(body.resources, "minerals", 0) + 100
+                        break
+                    for moon in body.moons:
+                        if moon.id == self.home_body_id:
+                            moon.resources.minerals = getattr(moon.resources, "minerals", 0) + 100
+                            break
+        self._sim_events.append({"type": "goal_completed", "goal_id": goal_id})
+
+    def compute_threat_levels(self) -> dict:
+        """Compute current threat level dict (0.0–1.0 each). Called after each tick."""
+        # bios: mean aggression of uplifted populations weighted by pop size
+        total_weight = 0.0
+        weighted_agg = 0.0
+        for pop in self.bio_state.all():
+            from .simulation import BioType
+            if pop.bio_type == BioType.UPLIFTED:
+                w = max(1.0, pop.population)
+                weighted_agg += pop.aggression * w
+                total_weight += w
+        bios_threat = (weighted_agg / total_weight) if total_weight > 0 else 0.0
+
+        # environmental: pending env events / 5, capped at 1.0
+        env_count = sum(
+            1 for pe in self.pending_events
+            if pe.event_type in ("asteroid_incoming", "solar_flare_warning")
+        )
+        env_threat = min(1.0, env_count / 5.0)
+
+        # resources: fraction of planet resources below 20% of 500-unit baseline
+        low_count = 0
+        total_count = 0
+        if self.galaxy:
+            for sys in self.galaxy.solar_systems:
+                for body in sys.orbital_bodies:
+                    res = getattr(body, "resources", None)
+                    if res is None:
+                        continue
+                    for attr in ("minerals", "rare_minerals", "gas"):
+                        val = getattr(res, attr, 0) or 0
+                        total_count += 1
+                        if val < 100:  # 20% of 500
+                            low_count += 1
+        res_threat = (low_count / total_count) if total_count > 0 else 0.0
+
+        return {"bios": min(1.0, bios_threat), "environmental": env_threat, "resources": min(1.0, res_threat)}
+
+    # ------------------------------------------------------------------
     # Simulation tick
 
     def tick(self, dt_years: float) -> None:
@@ -629,6 +709,7 @@ class GameState:
         self.tick_count += 1
         self.in_game_years += dt_years
         self._sim_events = self.sim_engine.tick(dt_years)
+        self.threat_levels = self.compute_threat_levels()
         self._ingest_events_to_ledger(self._sim_events)
         for ev in self._sim_events:
             kind = ev.get("type", "?")
@@ -669,6 +750,8 @@ class GameState:
                 message=msg,
                 color=color,
                 system_id=system_id,
+                event_id=ev.get("event_id"),
+                cause_event_id=ev.get("cause_event_id"),
             ))
         if new_entries:
             log = _get_logger()

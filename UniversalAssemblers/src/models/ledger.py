@@ -15,12 +15,14 @@ _ENTITY_TYPES = frozenset({
 
 @dataclass
 class LedgerEntry:
-    tick_year:  float        # gs.in_game_years at emission time
-    category:   str          # CATEGORY_ENTITY or CATEGORY_RANDOM
-    event_type: str          # raw ev["type"] string
-    message:    str          # pre-formatted human-readable string
-    color:      tuple        # RGB display color
-    system_id:  str | None   # None → always visible (global player events)
+    tick_year:      float        # gs.in_game_years at emission time
+    category:       str          # CATEGORY_ENTITY or CATEGORY_RANDOM
+    event_type:     str          # raw ev["type"] string
+    message:        str          # pre-formatted human-readable string
+    color:          tuple        # RGB display color
+    system_id:      str | None   # None → always visible (global player events)
+    event_id:       str | None = None   # stable id for pending-event correlation
+    cause_event_id: str | None = None   # ledger entry that caused this one
 
 
 def _resolve_location(ev: dict, body_env: dict, galaxy) -> tuple[str | None, str]:
@@ -205,6 +207,39 @@ def format_ledger_event(
     if etype == "entity_repaired":
         category = ev.get("category", "entity")
         return (f"Repaired {category}", (80, 220, 120), CATEGORY_ENTITY, system_id_default)
+
+    if etype == "asteroid_incoming":
+        return (
+            f"ASTEROID WARNING: impact in ~{ev.get('warn_years', 3):.0f} years at {loc}",
+            (255, 160, 40), CATEGORY_RANDOM, system_id_default,
+        )
+
+    if etype == "solar_flare_warning":
+        return (
+            f"SOLAR FLARE WARNING: ships at risk in {loc}",
+            (255, 200, 80), CATEGORY_RANDOM, system_id_default,
+        )
+
+    if etype == "bios_attack_imminent":
+        return (
+            f"BIOS REVOLT IMMINENT at {loc}",
+            (255, 80, 40), CATEGORY_RANDOM, system_id_default,
+        )
+
+    if etype == "pending_event_resolved":
+        choice = ev.get("choice", "ignored")
+        evtype = (ev.get("event_type") or "event").replace("_", " ").title()
+        return (
+            f"{evtype}: resolved ({choice})",
+            (160, 160, 160), CATEGORY_RANDOM, system_id_default,
+        )
+
+    if etype == "goal_completed":
+        goal_id = (ev.get("goal_id") or "goal").replace("_", " ").title()
+        return (
+            f"GOAL ACHIEVED: {goal_id}",
+            (80, 255, 120), CATEGORY_ENTITY, None,
+        )
 
     # Unknown event type — skip silently
     return None
