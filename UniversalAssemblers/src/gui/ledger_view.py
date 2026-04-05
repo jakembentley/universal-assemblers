@@ -195,6 +195,24 @@ class LedgerView:
             cy      += self._row_h
             total_h += self._row_h
 
+            # Cause-effect sub-line
+            cause_id = getattr(entry, "cause_event_id", None)
+            if cause_id and gs:
+                cause_entry = next(
+                    (e for e in gs._ledger
+                     if getattr(e, "event_id", None) == cause_id),
+                    None,
+                )
+                if cause_entry and cy > content_rect.y and cy < content_rect.bottom:
+                    dim_col = tuple(max(0, c // 2) for c in cause_entry.color)
+                    cause_msg = f"\u21b3 caused by: {cause_entry.message}"
+                    cause_s = _c.font_scaled(9).render(cause_msg, True, dim_col)
+                    sub_x = msg_x + _c.scaled(12)
+                    sub_h = cause_s.get_height() + _c.scaled(2)
+                    surface.blit(cause_s, (sub_x, cy))
+                    cy      += sub_h
+                    total_h += sub_h
+
         self._content_h = total_h
 
         # Scrollbar
