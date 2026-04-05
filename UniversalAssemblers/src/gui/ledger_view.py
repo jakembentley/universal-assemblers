@@ -181,14 +181,15 @@ class LedgerView:
             surface.blit(badge_s, badge_s.get_rect(center=badge_r.center))
 
             # Message text — truncate if too wide
-            msg     = entry.message
-            msg_s   = _c.font_scaled(11).render(msg, True, entry.color)
+            msg_font = _c.font_scaled(11)
+            msg      = entry.message
+            msg_s    = msg_font.render(msg, True, entry.color)
             if msg_s.get_width() > msg_max_w:
                 # Trim to fit
-                while msg and _c.font_scaled(11).size(msg + "…")[0] > msg_max_w:
+                while msg and msg_font.size(msg + "…")[0] > msg_max_w:
                     msg = msg[:-1]
                 msg   = msg + "…"
-                msg_s = _c.font_scaled(11).render(msg, True, entry.color)
+                msg_s = msg_font.render(msg, True, entry.color)
             surface.blit(msg_s, (msg_x, cy + (self._row_h - msg_s.get_height()) // 2))
 
             cy      += self._row_h

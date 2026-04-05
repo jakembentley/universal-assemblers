@@ -21,10 +21,6 @@ class GameClock:
         self._speed_idx: int = 0
         self._paused: bool = False
         self._badge_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)  # set in draw
-        # HUD geometry — sits inside the taskbar (y=0, h=TASKBAR_H)
-        self._rect = pygame.Rect(
-            _c.WINDOW_WIDTH - _c.scaled(272), 2, _c.scaled(262), _c.scaled(32)
-        )
 
     # ------------------------------------------------------------------
     # Time management
@@ -80,7 +76,9 @@ class GameClock:
     # Drawing
 
     def draw(self, surface: pygame.Surface) -> None:
-        rect = self._rect
+        rect = pygame.Rect(
+            _c.WINDOW_WIDTH - _c.scaled(272), 2, _c.scaled(262), _c.scaled(32)
+        )
 
         # Semi-transparent dark pill background
         bg = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)

@@ -13,7 +13,7 @@ from .constants import (
     C_PANEL, C_BORDER, C_ACCENT, C_TEXT, C_TEXT_DIM, C_BTN, C_BTN_TXT,
     PADDING, font,
 )
-from src.tutorial import STEPS
+from ..tutorial import STEPS
 
 
 _PANEL_W  = 360

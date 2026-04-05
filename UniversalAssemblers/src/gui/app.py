@@ -30,6 +30,7 @@ from .new_game_panel import NewGamePanel
 from .tutorial_overlay import TutorialOverlay
 from ..generator import MapGenerator
 from ..models.celestial import Galaxy
+from ..models.entity import invalidate_body_system_cache
 from ..game_state import GameState
 from ..keybindings import Keybindings
 from ..tutorial import TutorialManager
@@ -246,6 +247,7 @@ class App:
 
     def launch_game(self, settings: dict) -> None:
         """Called by NewGamePanel when START is clicked."""
+        invalidate_body_system_cache()
         gen = MapGenerator(
             num_solar_systems=settings.get("num_solar_systems", 12),
             galaxy_name=settings.get("galaxy_name", "Unnamed Sector"),
@@ -366,6 +368,7 @@ class App:
 
     def _load_from_path(self, path: str) -> None:
         """Load a save file from a given path (used by load_game and quickload)."""
+        invalidate_body_system_cache()
         try:
             with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)

@@ -77,7 +77,7 @@ STEPS: list[TutorialStep] = [
         ),
         condition=lambda gs: bool(
             gs and any(
-                len(gs.factory_tasks.get(b.id)) > 0
+                len(gs.factory_tasks.get(b.id, [])) > 0
                 for sys in (gs.galaxy.solar_systems if gs.galaxy else [])
                 for b in sys.orbital_bodies
             )

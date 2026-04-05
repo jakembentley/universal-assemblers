@@ -2192,6 +2192,145 @@ except Exception as e:
     fail("enforcer in _BUILD_BOTS", f"unexpected exception: {e}")
 
 
+# ─── TutorialManager ─────────────────────────────────────────────────────────
+section("TutorialManager")
+
+from src.tutorial import TutorialManager, STEPS
+
+# 1. disabled by default
+try:
+    tm = TutorialManager()
+    assert not tm.enabled, "should start disabled"
+    assert tm.step_idx == 0, "should start at step 0"
+    assert not tm.complete, "should not be complete"
+    ok("TutorialManager starts disabled at step 0")
+except AssertionError as e:
+    fail("TutorialManager initial state", str(e))
+except Exception as e:
+    fail("TutorialManager initial state", f"unexpected exception: {e}")
+
+# 2. current_step is None when disabled
+try:
+    tm = TutorialManager()
+    assert tm.current_step is None, "current_step should be None when disabled"
+    ok("current_step is None when disabled")
+except AssertionError as e:
+    fail("current_step None when disabled", str(e))
+except Exception as e:
+    fail("current_step None when disabled", f"unexpected exception: {e}")
+
+# 3. current_step returns first step when enabled
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    step = tm.current_step
+    assert step is not None, "current_step should not be None when enabled"
+    assert step is STEPS[0], "current_step should be STEPS[0]"
+    ok("current_step returns first step when enabled")
+except AssertionError as e:
+    fail("current_step first step when enabled", str(e))
+except Exception as e:
+    fail("current_step first step when enabled", f"unexpected exception: {e}")
+
+# 4. next_step advances the index
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    tm.next_step()
+    assert tm.step_idx == 1, f"step_idx should be 1 after next_step, got {tm.step_idx}"
+    assert tm.current_step is STEPS[1], "current_step should be STEPS[1] after one advance"
+    ok("next_step advances step_idx to 1")
+except AssertionError as e:
+    fail("next_step advances index", str(e))
+except Exception as e:
+    fail("next_step advances index", f"unexpected exception: {e}")
+
+# 5. advancing past last step sets complete=True
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    for _ in STEPS:
+        tm.next_step()
+    assert tm.complete, "complete should be True after advancing past all steps"
+    assert tm.current_step is None, "current_step should be None when complete"
+    ok("advancing past last step marks tutorial complete")
+except AssertionError as e:
+    fail("complete after all steps", str(e))
+except Exception as e:
+    fail("complete after all steps", f"unexpected exception: {e}")
+
+# 6. skip() immediately completes the tutorial
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    tm.skip()
+    assert tm.complete, "skip() should set complete=True"
+    assert tm.current_step is None, "current_step should be None after skip"
+    ok("skip() marks tutorial complete immediately")
+except AssertionError as e:
+    fail("skip completes tutorial", str(e))
+except Exception as e:
+    fail("skip completes tutorial", f"unexpected exception: {e}")
+
+# 7. to_dict / from_dict round-trip
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    tm.step_idx = 3
+    d = tm.to_dict()
+    tm2 = TutorialManager.from_dict(d)
+    assert tm2.enabled == True, "enabled should survive round-trip"
+    assert tm2.step_idx == 3, f"step_idx should be 3, got {tm2.step_idx}"
+    assert tm2.complete == False, "complete should be False"
+    ok("TutorialManager to_dict/from_dict round-trip preserves state")
+except AssertionError as e:
+    fail("to_dict/from_dict round-trip", str(e))
+except Exception as e:
+    fail("to_dict/from_dict round-trip", f"unexpected exception: {e}")
+
+# 8. tick() with a False condition does not advance
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    # advance to step with a condition (step 2 = index 2 — mining condition)
+    tm.step_idx = 2
+    gs = _fresh_gs()
+    tm.tick(gs)
+    assert tm.step_idx == 2, f"tick should not advance when condition is False, step_idx={tm.step_idx}"
+    ok("tick() does not advance when condition is not met")
+except AssertionError as e:
+    fail("tick does not advance on false condition", str(e))
+except Exception as e:
+    fail("tick does not advance on false condition", f"unexpected exception: {e}")
+
+# 9. tick() with a True condition auto-advances
+try:
+    tm = TutorialManager()
+    tm.enabled = True
+    # Step 5 (index 5) condition: gs.tech.in_progress_ids() is truthy
+    tm.step_idx = 5
+    gs = _fresh_gs()
+    # Force something into in_progress
+    gs.tech._progress = {"structure_modules": 0.5}
+    tm.tick(gs)
+    assert tm.step_idx == 6, f"tick should advance when condition is True, step_idx={tm.step_idx}"
+    ok("tick() auto-advances when condition is met")
+except AssertionError as e:
+    fail("tick advances on true condition", str(e))
+except Exception as e:
+    fail("tick advances on true condition", f"unexpected exception: {e}")
+
+# 10. STEPS list is non-empty and last step has no condition (manual close)
+try:
+    assert len(STEPS) > 0, "STEPS should not be empty"
+    assert STEPS[-1].condition is None, "last step should have no auto-advance condition"
+    ok("STEPS is non-empty and last step requires manual advance")
+except AssertionError as e:
+    fail("STEPS structure", str(e))
+except Exception as e:
+    fail("STEPS structure", f"unexpected exception: {e}")
+
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 print(f"\n{'-'*50}")
 print(f"Unit tests: {_passed} passed, {_failed} failed")

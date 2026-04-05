@@ -124,6 +124,6 @@ def set_ui_scale(screen_height: int) -> None:
     _mod.PADDING    = scaled(8)
     _mod.RES_STRIP_H = scaled(160)
     _mod.TOP_H      = screen_height - _mod.ENT_H - _mod.TASKBAR_H
-    # MAP_W and MAP_X depend on WINDOW_WIDTH; those are patched by
-    # change_resolution() after calling set_ui_scale().
+    _mod.MAP_W      = _mod.WINDOW_WIDTH - _mod.NAV_W
+    _mod.MAP_X      = _mod.NAV_W
     _font_cache.clear()
