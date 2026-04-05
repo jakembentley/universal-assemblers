@@ -254,11 +254,164 @@ class SimulationEngine:
         seed = gs.galaxy.seed ^ 0xDEADF00D if gs.galaxy else 0xDEADF00D
         self.rng = random.Random(seed)
 
+    # ------------------------------------------------------------------
+    # Pending event resolution
+
+    def _tick_pending_events(self, dt_years: float) -> list:
+        """Decrement countdowns, apply mitigations, fire originals on expiry."""
+        events: list = []
+        still_pending: list = []
+        for pe in self.gs.pending_events:
+            if pe.chosen is not None:
+                events.extend(self._apply_pending_event_mitigation(pe))
+                events.append({
+                    "type": "pending_event_resolved",
+                    "event_id": pe.event_id,
+                    "event_type": pe.event_type,
+                    "choice": pe.chosen,
+                    "body_id": pe.payload.get("body_id"),
+                    "system_id": pe.payload.get("system_id"),
+                })
+            else:
+                pe.warn_years_remaining -= dt_years
+                if pe.warn_years_remaining <= 0:
+                    events.extend(self._fire_original_event(pe))
+                    events.append({
+                        "type": "pending_event_resolved",
+                        "event_id": pe.event_id,
+                        "event_type": pe.event_type,
+                        "choice": "ignored",
+                        "body_id": pe.payload.get("body_id"),
+                        "system_id": pe.payload.get("system_id"),
+                    })
+                else:
+                    still_pending.append(pe)
+        self.gs.pending_events = still_pending
+        return events
+
+    def _apply_pending_event_mitigation(self, pe) -> list:
+        """Apply mitigation based on player's choice. Returns any resulting events."""
+        events: list = []
+        choice = pe.chosen
+        payload = pe.payload
+        etype = pe.event_type
+
+        if etype == "asteroid_incoming":
+            if choice == "deflector":
+                pass  # cancelled — no damage
+            elif choice == "evacuate":
+                body_id = payload.get("body_id", "")
+                cat     = payload.get("entity_cat", "structure")
+                ttype   = payload.get("entity_type", "factory")
+                dmg     = int(payload.get("damage", 100) * 0.5)
+                destroyed = self.gs.apply_damage(body_id, cat, ttype, dmg)
+                ev_type = "asteroid_impact"
+                events.append({
+                    "type": ev_type, "body_id": body_id,
+                    "system_id": payload.get("system_id", ""),
+                    "entity_type": ttype, "destroyed": destroyed,
+                    "cause_event_id": payload.get("event_id"),
+                })
+            elif choice == "accept":
+                events.extend(self._fire_original_event(pe))
+
+        elif etype == "solar_flare_warning":
+            if choice == "shield":
+                pass  # cancelled
+            elif choice == "reduce":
+                sys_id  = payload.get("system_id", "")
+                cat     = payload.get("entity_cat", "ship")
+                ttype   = payload.get("entity_type", "")
+                dmg     = int(payload.get("damage", 30) * 0.5)
+                if ttype:
+                    destroyed = self.gs.apply_damage(sys_id, cat, ttype, dmg)
+                    ev_type = "solar_flare_destroyed" if destroyed else "solar_flare_damaged"
+                    events.append({
+                        "type": ev_type, "system_id": sys_id,
+                        "entity_cat": cat, "entity_type": ttype, "damage": dmg,
+                    })
+            elif choice == "accept":
+                events.extend(self._fire_original_event(pe))
+
+        elif etype == "bios_attack_imminent":
+            if choice == "negotiate":
+                # Reduce aggression for this body's bio population
+                body_id = payload.get("body_id", "")
+                pop = self.gs.bio_state.get(body_id)
+                if pop:
+                    pop.aggression = max(0.0, pop.aggression - 0.2)
+            elif choice == "reinforce":
+                body_id = payload.get("body_id", "")
+                cat     = payload.get("entity_cat", "structure")
+                ttype   = payload.get("entity_type", "factory")
+                dmg     = int(payload.get("damage", 20) * 0.8)
+                destroyed = self.gs.apply_damage(body_id, cat, ttype, dmg)
+                ev_type = "bios_entity_destroyed" if destroyed else "bios_entity_damaged"
+                events.append({
+                    "type": ev_type, "body_id": body_id,
+                    "system_id": payload.get("system_id", ""),
+                    "entity_cat": cat, "entity_type": ttype, "damage": dmg,
+                })
+            elif choice == "accept":
+                events.extend(self._fire_original_event(pe))
+
+        return events
+
+    def _fire_original_event(self, pe) -> list:
+        """Re-fire the full-damage version of a pending event."""
+        events: list = []
+        payload = pe.payload
+        etype   = pe.event_type
+
+        if etype == "asteroid_incoming":
+            body_id = payload.get("body_id", "")
+            cat     = payload.get("entity_cat", "structure")
+            ttype   = payload.get("entity_type", "factory")
+            dmg     = int(payload.get("damage", 100))
+            if body_id and ttype:
+                destroyed = self.gs.apply_damage(body_id, cat, ttype, dmg)
+                events.append({
+                    "type": "asteroid_impact", "body_id": body_id,
+                    "system_id": payload.get("system_id", ""),
+                    "entity_type": ttype, "destroyed": destroyed,
+                })
+
+        elif etype == "solar_flare_warning":
+            sys_id = payload.get("system_id", "")
+            cat    = payload.get("entity_cat", "ship")
+            ttype  = payload.get("entity_type", "")
+            dmg    = int(payload.get("damage", 30))
+            if sys_id and ttype:
+                destroyed = self.gs.apply_damage(sys_id, cat, ttype, dmg)
+                ev_type = "solar_flare_destroyed" if destroyed else "solar_flare_damaged"
+                events.append({
+                    "type": ev_type, "system_id": sys_id,
+                    "entity_cat": cat, "entity_type": ttype, "damage": dmg,
+                })
+
+        elif etype == "bios_attack_imminent":
+            body_id = payload.get("body_id", "")
+            cat     = payload.get("entity_cat", "structure")
+            ttype   = payload.get("entity_type", "factory")
+            dmg     = int(payload.get("damage", 20))
+            if body_id and ttype:
+                destroyed = self.gs.apply_damage(body_id, cat, ttype, dmg)
+                ev_type = "bios_entity_destroyed" if destroyed else "bios_entity_damaged"
+                events.append({
+                    "type": ev_type, "body_id": body_id,
+                    "system_id": payload.get("system_id", ""),
+                    "entity_cat": cat, "entity_type": ttype, "damage": dmg,
+                    "cause_event_id": pe.event_id,
+                })
+
+        return events
+
     def tick(self, dt_years: float) -> list:
         """Run one sim step. Returns event dicts for UI notification."""
         events: list = []
         events.extend(self._tick_bios(dt_years))
         events.extend(self._tick_random_events(dt_years))
+        events.extend(self._tick_pending_events(dt_years))
         events.extend(self._tick_dyson_spheres(dt_years))
         events.extend(self._tick_power_plants(dt_years))
         events.extend(self._tick_research(dt_years))
@@ -383,7 +536,7 @@ class SimulationEngine:
                             "system_id": body_to_system.get(pop.body_id, ""),
                         })
 
-            # --- Attacks: uplifted bios with aggression > 0.5 can damage any entity type ---
+            # --- Attacks: uplifted bios with high aggression warn player first ---
             if pop.bio_type == BioType.UPLIFTED and pop.aggression > 0.5:
                 damage_chance = pop.aggression * 0.08 * dt_years
                 if rng.random() < damage_chance:
@@ -407,22 +560,54 @@ class SimulationEngine:
                             "enforcers":   enforcer_count,
                         })
                         continue
-                    target = self._pick_bio_attack_target(all_entities, rng)
-                    if target:
-                        dmg = int(rng.randint(10, 30) * min(2.0, pop.population / 1000.0))
-                        dmg = max(10, dmg)
-                        destroyed = self.gs.apply_damage(
-                            pop.body_id, target.category, target.type_value, dmg
-                        )
-                        ev_type = "bios_entity_destroyed" if destroyed else "bios_entity_damaged"
-                        events.append({
-                            "type":        ev_type,
-                            "body_id":     pop.body_id,
-                            "system_id":   body_to_system.get(pop.body_id, ""),
-                            "entity_cat":  target.category,
-                            "entity_type": target.type_value,
-                            "damage":      dmg,
-                        })
+                    # Only create a new pending event if one isn't already queued
+                    already_pending = any(
+                        pe.event_type == "bios_attack_imminent"
+                        and pe.payload.get("body_id") == pop.body_id
+                        for pe in self.gs.pending_events
+                    )
+                    if not already_pending:
+                        target = self._pick_bio_attack_target(all_entities, rng)
+                        if target:
+                            dmg = int(rng.randint(10, 30) * min(2.0, pop.population / 1000.0))
+                            dmg = max(10, dmg)
+                            pe_id = _uuid.uuid4().hex
+                            # Find cause: recent bio_aggression_spike for same body
+                            cause_id = None
+                            for entry in self.gs._ledger[:50]:  # check recent entries
+                                if (getattr(entry, "event_type", "") == "bio_aggression_spike"
+                                        and getattr(entry, "system_id", None)
+                                        == body_to_system.get(pop.body_id)
+                                        and (self.gs.in_game_years - entry.tick_year) <= 10):
+                                    cause_id = getattr(entry, "event_id", None)
+                                    break
+                            from .game_state import PendingEvent
+                            pe = PendingEvent(
+                                event_id=pe_id,
+                                event_type="bios_attack_imminent",
+                                payload={
+                                    "body_id": pop.body_id,
+                                    "system_id": body_to_system.get(pop.body_id, ""),
+                                    "entity_cat": target.category,
+                                    "entity_type": target.type_value,
+                                    "damage": dmg,
+                                    "event_id": pe_id,
+                                },
+                                warn_years_remaining=4.0,
+                                choices=[
+                                    {"key": "negotiate", "label": "Negotiate",         "cost": {"minerals": 80}, "effect": "Cancel attack, reduce aggression"},
+                                    {"key": "reinforce", "label": "Reinforce Defenses","cost": {"minerals": 50}, "effect": "80% damage"},
+                                    {"key": "accept",    "label": "Accept Attack",     "cost": {}, "effect": "Full damage"},
+                                ],
+                            )
+                            self.gs.pending_events.append(pe)
+                            events.append({
+                                "type":      "bios_attack_imminent",
+                                "body_id":   pop.body_id,
+                                "system_id": body_to_system.get(pop.body_id, ""),
+                                "event_id":  pe_id,
+                                "cause_event_id": cause_id,
+                            })
 
         for body_id in extinct_ids:
             self.gs.bio_state.remove(body_id)
@@ -510,14 +695,28 @@ class SimulationEngine:
         if ships_here and rng.random() < 0.04 * dt_years:
             target = rng.choice(ships_here)
             dmg = rng.randint(20, 50)
-            destroyed = self.gs.apply_damage(sys_id, "ship", target.type_value, dmg)
-            ev_type = "solar_flare_destroyed" if destroyed else "solar_flare_damaged"
+            pe_id = _uuid.uuid4().hex
+            from .game_state import PendingEvent
+            pe = PendingEvent(
+                event_id=pe_id,
+                event_type="solar_flare_warning",
+                payload={
+                    "system_id": sys_id, "entity_cat": "ship",
+                    "entity_type": target.type_value, "damage": dmg,
+                    "event_id": pe_id,
+                },
+                warn_years_remaining=2.0,
+                choices=[
+                    {"key": "shield",  "label": "Shield Ships",   "cost": {"energy": 40}, "effect": "Cancels damage"},
+                    {"key": "reduce",  "label": "Reduce Shields", "cost": {"energy": 20}, "effect": "Half damage"},
+                    {"key": "accept",  "label": "Accept Damage",  "cost": {}, "effect": "Full damage"},
+                ],
+            )
+            self.gs.pending_events.append(pe)
             return {
-                "type":        ev_type,
-                "system_id":   sys_id,
-                "entity_cat":  "ship",
-                "entity_type": target.type_value,
-                "damage":      dmg,
+                "type":      "solar_flare_warning",
+                "system_id": sys_id,
+                "event_id":  pe_id,
             }
         return None
 
@@ -539,16 +738,33 @@ class SimulationEngine:
         bio_pop       = gs.bio_state.get(body_id)
         uplifted_bio  = bio_pop if (bio_pop and bio_pop.bio_type == BioType.UPLIFTED) else None
 
-        # Asteroid impact
+        # Asteroid impact — warn player first via PendingEvent
         if structures and rng.random() < 0.02 * dt_years:
             target = rng.choice(structures)
-            destroyed = gs.apply_damage(body_id, "structure", target.type_value, 100)
+            pe_id = _uuid.uuid4().hex
+            from .game_state import PendingEvent
+            pe = PendingEvent(
+                event_id=pe_id,
+                event_type="asteroid_incoming",
+                payload={
+                    "body_id": body_id, "system_id": sys_id,
+                    "entity_cat": "structure", "entity_type": target.type_value,
+                    "damage": 100, "event_id": pe_id,
+                },
+                warn_years_remaining=3.0,
+                choices=[
+                    {"key": "deflector", "label": "Deploy Deflector", "cost": {"minerals": 80}, "effect": "Cancels impact"},
+                    {"key": "evacuate",  "label": "Evacuate Assets",  "cost": {"ship_slots": 1}, "effect": "Half damage"},
+                    {"key": "accept",    "label": "Accept Impact",    "cost": {}, "effect": "Full damage"},
+                ],
+            )
+            gs.pending_events.append(pe)
             return {
-                "type":        "asteroid_impact",
-                "body_id":     body_id,
-                "system_id":   sys_id,
-                "entity_type": target.type_value,
-                "destroyed":   destroyed,
+                "type":      "asteroid_incoming",
+                "body_id":   body_id,
+                "system_id": sys_id,
+                "event_id":  pe_id,
+                "warn_years": 3,
             }
 
         # Factory malfunction
