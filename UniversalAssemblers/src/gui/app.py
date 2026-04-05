@@ -25,6 +25,8 @@ from .queue_view import QueueView
 from .ledger_view import LedgerView
 from .help_view import HelpView
 from .debug_view import DebugView
+from .event_choice_view import EventChoiceView
+from .objectives_view import ObjectivesView
 from .tooltip import Tooltip
 from .new_game_panel import NewGamePanel
 from .tutorial_overlay import TutorialOverlay
@@ -89,6 +91,8 @@ class App:
         self.help_view      = HelpView(self)
         self.tooltip         = Tooltip()
         self.debug_view      = DebugView(self)
+        self.event_choice_view = EventChoiceView(self)
+        self.objectives_view   = ObjectivesView(self)
         self.new_game_panel  = NewGamePanel(self)
         self.tutorial_overlay = TutorialOverlay(self)
 
@@ -235,6 +239,12 @@ class App:
 
     def close_debug_view(self) -> None:
         self.debug_view.deactivate()
+
+    def open_event_choice_view(self, pending_event) -> None:
+        self.event_choice_view.activate(pending_event)
+
+    def open_objectives_view(self) -> None:
+        self.objectives_view.activate()
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -634,6 +644,47 @@ class App:
                 else:
                     msg = f"RESEARCH BREAKTHROUGH: {name} advanced"
                     col = (100, 180, 255)
+            elif etype == "asteroid_incoming":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                msg = f"\u26a0 ASTEROID INCOMING at {loc} — {ev.get('warn_years', 3):.0f} years to respond"
+                col = (255, 160, 40)
+                # Also activate the event choice overlay
+                gs = self.game_state
+                if gs:
+                    pe_id = ev.get("event_id")
+                    matching = next((p for p in gs.pending_events if p.event_id == pe_id), None)
+                    if matching:
+                        self.event_choice_view.activate(matching)
+            elif etype == "solar_flare_warning":
+                loc = self._location_name(None, ev.get("system_id"))
+                msg = f"\u26a0 SOLAR FLARE WARNING in {loc} — 2 years to respond"
+                col = (255, 200, 80)
+                gs = self.game_state
+                if gs:
+                    pe_id = ev.get("event_id")
+                    matching = next((p for p in gs.pending_events if p.event_id == pe_id), None)
+                    if matching:
+                        self.event_choice_view.activate(matching)
+            elif etype == "bios_attack_imminent":
+                loc = self._location_name(ev.get("body_id"), ev.get("system_id"))
+                msg = f"\u26a0 BIOS REVOLT IMMINENT at {loc} — 4 years to respond"
+                col = (255, 80, 40)
+                gs = self.game_state
+                if gs:
+                    pe_id = ev.get("event_id")
+                    matching = next((p for p in gs.pending_events if p.event_id == pe_id), None)
+                    if matching:
+                        self.event_choice_view.activate(matching)
+            elif etype == "goal_completed":
+                goal_id = (ev.get("goal_id") or "goal").replace("_", " ").title()
+                msg = f"GOAL ACHIEVED: {goal_id}"
+                col = (80, 255, 120)
+                TTL = 8000
+            elif etype == "pending_event_resolved":
+                choice = ev.get("choice", "ignored")
+                evtype = (ev.get("event_type") or "event").replace("_", " ").title()
+                msg = f"{evtype}: {choice}"
+                col = (160, 160, 160)
             elif etype == "victory":
                 vtype = ev.get("victory_type", "unknown")
                 self._victory_state = vtype
@@ -818,6 +869,7 @@ class App:
                     or self.queue_view.is_active
                     or self.ledger_view.is_active
                     or self.help_view.is_active
+                    or self.objectives_view.is_active
                 )
                 if not self.pause_menu.is_active:
                     self.game_view.handle_events(events, overlays_active=modal_overlays_active)
@@ -860,6 +912,21 @@ class App:
             if self.debug_view.is_active:
                 self.debug_view.handle_events(events)
                 self.debug_view.draw(self.screen)
+
+            # Event choice overlay — non-exclusive, floats above game
+            if self.state in ("galaxy", "system") and self.game_state:
+                self.event_choice_view.draw(self.screen, self.game_state)
+                for ev in events:
+                    self.event_choice_view.handle_event(ev, self.game_state)
+
+            # Objectives panel
+            if self.objectives_view.is_active and self.game_state:
+                self.objectives_view.handle_event(
+                    pygame.event.Event(pygame.NOEVENT), self.game_state
+                )  # process scroll/close logic each frame
+                for ev in events:
+                    self.objectives_view.handle_event(ev, self.game_state)
+                self.objectives_view.draw(self.screen, self.game_state)
 
             # Tutorial overlay — shown during gameplay when tutorial mode is active
             if self.state in ("galaxy", "system") and self.tutorial.enabled and not self.tutorial.complete:
